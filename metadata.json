@@ -1,0 +1,7 @@
+{
+  "name": "RealLedger",
+  "description": "A financial super-app for the Hybrid Real Estate Professional in Canada, bridging the gap between Active Agent (T2125) and Passive Investor (T776).",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
