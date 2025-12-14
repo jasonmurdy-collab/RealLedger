@@ -7,6 +7,15 @@ export interface SplitDetail {
   category: string;
 }
 
+export interface UserProfile {
+  id?: string; // matches auth.users.id
+  full_name: string;
+  role: string;
+  cra_business_number?: string;
+  sin_last_4?: string;
+  is_pro_member?: boolean;
+}
+
 export interface Property {
   id: string;
   address: string;
@@ -16,6 +25,7 @@ export interface Property {
   uccBalance: number; // Undepreciated Capital Cost
   tenantName: string;
   leaseEnd: string;
+  user_id?: string;
 }
 
 export interface Transaction {
@@ -37,11 +47,22 @@ export interface Transaction {
   user_id?: string; // Added for Supabase RLS
 }
 
-export interface Metric {
-  label: string;
-  value: string;
-  trend?: number; // percentage
-  subLabel?: string;
+export interface MileageLog {
+    id?: string;
+    date: string;
+    startLocation: string;
+    endLocation: string;
+    purpose: string;
+    distance: number; // in kilometers
+    user_id?: string;
+}
+
+export interface Notification {
+    id: string;
+    type: 'pending_tx' | 'budget_over' | 'lease_expiry';
+    message: string;
+    date: Date;
+    relatedId?: string; // e.g., transaction ID or budget category name
 }
 
 export interface ChartDataPoint {

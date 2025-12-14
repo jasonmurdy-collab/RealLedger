@@ -1,14 +1,27 @@
 import React, { useState } from 'react';
-import { X, Receipt, Building, Briefcase, Calculator, Camera, Check } from 'lucide-react';
+import { X, Receipt, Building, Briefcase, Calculator, Camera, Check, UploadCloud } from 'lucide-react';
 import { ComplianceAssistant } from './ComplianceAssistant';
-import { Property, Transaction } from '../types';
+import { Property, Transaction, LedgerType } from '../types';
+import { ONTARIO_HST_RATE } from '../constants';
+import { GoogleGenAI, Type } from "@google/genai";
 
 interface QuickCaptureDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddTransaction: (transaction: Omit<Transaction, 'id' | 'status'>) => Promise<void>;
+  onAddTransaction: (transaction: Omit<Transaction, 'id' | 'status'> | Omit<Transaction, 'id' | 'status'>[]) => Promise<void>;
   properties: Property[];
 }
+
+const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.readAsDataURL(file);
+  reader.onload = () => {
+    const result = reader.result as string;
+    // Remove the data URL prefix e.g. "data:image/png;base64,"
+    resolve(result.split(',')[1]);
+  };
+  reader.onerror = error => reject(error);
+});
 
 export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, onClose, onAddTransaction, properties }) => {
   const [amount, setAmount] = useState<string>('');
@@ -18,53 +31,138 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
   const [category, setCategory] = useState('Supplies');
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [receiptImage, setReceiptImage] = useState<string | null>(null);
   const [selectedProperty, setSelectedProperty] = useState(properties.length > 0 ? properties[0].id : '');
 
   if (!isOpen) return null;
 
-  const handleScan = () => {
+  const performOcr = async (file: File) => {
+    if (!file) return;
     setIsScanning(true);
-    // Simulate OCR delay
-    setTimeout(() => {
-        setAmount('452.20');
-        setVendor('Home Depot');
-        setCategory('Repairs');
-        setIsScanning(false);
-    }, 2000);
-  };
+    setAmount('');
+    setVendor('');
 
+    try {
+      const base64Image = await fileToBase64(file);
+      
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: {
+          parts: [
+            {
+              text: "Analyze this receipt image. Extract the vendor name and the final total amount as a number. Respond with a JSON object only."
+            },
+            {
+              inlineData: {
+                mimeType: file.type,
+                data: base64Image,
+              },
+            },
+          ],
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              vendor: { type: Type.STRING },
+              amount: { type: Type.NUMBER },
+            },
+            required: ["vendor", "amount"]
+          },
+        },
+      });
+
+      const jsonString = response.text.trim();
+      const parsedData = JSON.parse(jsonString);
+
+      if (parsedData.vendor) setVendor(parsedData.vendor);
+      if (parsedData.amount) setAmount(parsedData.amount.toString());
+
+      // Simulate capturing the image for the UI
+      setReceiptImage("data:image/png;base64," + base64Image);
+
+    } catch (error) {
+      console.error("OCR Scan failed:", error);
+      // You could set an error state here to show in the UI
+    } finally {
+      setIsScanning(false);
+    }
+  };
+  
   const handleLogTransaction = async () => {
     setIsSaving(true);
+    const numAmount = parseFloat(amount) || 0;
+    const isSplit = splitRatio > 0 && splitRatio < 100;
+    const date = new Date().toISOString().split('T')[0];
     
-    // In a real app, you would have more robust logic for splits.
-    // This is a simplified example. We'll log it as a single transaction
-    // with the dominant type.
-    const primaryType = splitRatio >= 50 ? 'active' : 'passive';
-    
-    const newTransaction: Omit<Transaction, 'id' | 'status'> = {
-      date: new Date().toISOString().split('T')[0],
-      vendor,
-      amount: -(parseFloat(amount) || 0),
-      type: primaryType,
-      category,
-      hstIncluded: includeHST,
-      isSplit: splitRatio > 0 && splitRatio < 100,
-      propertyId: primaryType === 'passive' ? selectedProperty : undefined,
-      taxForm: primaryType === 'active' ? 't2125' : 't776',
-    };
-    
-    await onAddTransaction(newTransaction);
+    // This will be a mock URL. In a real app, you'd upload the base64 image to Supabase Storage and get a public URL.
+    const mockReceiptUrl = receiptImage ? `https://storage.supabase.com/receipts/${Date.now()}.jpg` : undefined;
+
+    if (isSplit) {
+      const hstAmount = includeHST ? numAmount - (numAmount / (1 + ONTARIO_HST_RATE)) : 0;
+      const subtotal = numAmount - hstAmount;
+      
+      const activeAllocation = subtotal * (splitRatio / 100);
+      const passiveAllocation = subtotal * ((100 - splitRatio) / 100);
+      
+      const activeHst = hstAmount * (splitRatio / 100);
+      const passiveHst = hstAmount * ((100 - splitRatio) / 100);
+
+      const transactionsToCreate: Omit<Transaction, 'id' | 'status'>[] = [];
+
+      if (activeAllocation > 0) {
+        transactionsToCreate.push({
+          date, vendor, category,
+          amount: -(activeAllocation + activeHst),
+          type: 'active' as LedgerType,
+          taxForm: 't2125',
+          isSplit: true,
+          hstIncluded: includeHST,
+          hstAmount: activeHst,
+          receiptUrl: mockReceiptUrl,
+        });
+      }
+      
+      if (passiveAllocation > 0) {
+        transactionsToCreate.push({
+          date, vendor, category,
+          amount: -(passiveAllocation + passiveHst),
+          type: 'passive' as LedgerType,
+          taxForm: 't776',
+          isSplit: true,
+          hstIncluded: includeHST,
+          hstAmount: passiveHst,
+          propertyId: selectedProperty,
+          receiptUrl: mockReceiptUrl,
+        });
+      }
+      await onAddTransaction(transactionsToCreate);
+
+    } else {
+      const primaryType = splitRatio === 100 ? 'active' : 'passive';
+      const newTransaction: Omit<Transaction, 'id' | 'status'> = {
+        date, vendor, category,
+        amount: -numAmount,
+        type: primaryType,
+        isSplit: false,
+        hstIncluded: includeHST,
+        propertyId: primaryType === 'passive' ? selectedProperty : undefined,
+        taxForm: primaryType === 'active' ? 't2125' : 't776',
+        receiptUrl: mockReceiptUrl,
+      };
+      await onAddTransaction(newTransaction);
+    }
     
     setIsSaving(false);
     onClose();
   };
 
   const numAmount = parseFloat(amount) || 0;
-  
-  // Canadian HST Logic (13%)
-  const hstAmount = includeHST ? numAmount - (numAmount / 1.13) : 0;
+  const hstAmount = includeHST ? numAmount - (numAmount / (1 + ONTARIO_HST_RATE)) : 0;
   const subtotal = numAmount - hstAmount;
-  
   const activeAllocation = (subtotal * (splitRatio / 100));
   const passiveAllocation = (subtotal * ((100 - splitRatio) / 100));
 
@@ -77,7 +175,6 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
 
       <div className="relative w-full max-w-md bg-[#0e0e11] rounded-t-3xl border-t border-white/10 shadow-2xl animate-slide-up h-[90vh] overflow-y-auto hide-scrollbar">
         
-        {/* Handle */}
         <div className="sticky top-0 z-20 bg-[#0e0e11]/95 backdrop-blur-md pb-4 pt-4 px-6 border-b border-white/5">
           <div className="w-12 h-1.5 bg-zinc-800 rounded-full mx-auto mb-6" />
           
@@ -88,7 +185,6 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
             </button>
           </div>
 
-          {/* Amount Input Area */}
           <div className="flex flex-col items-center justify-center mb-2 relative">
             <div className="flex items-center gap-2">
                 <span className="text-4xl text-zinc-500 font-light">$</span>
@@ -102,18 +198,32 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
                 />
             </div>
             
-            {/* Scan Button Overlay */}
-            <button 
-                onClick={handleScan}
-                disabled={isScanning}
-                className={`mt-4 flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold transition-all ${isScanning ? 'bg-zinc-800 text-zinc-500' : 'bg-gradient-to-r from-rose-500 to-orange-500 text-white shadow-lg shadow-rose-500/20'}`}
-            >
-                {isScanning ? (
-                    <>Scanning Receipt via Vision AI...</>
-                ) : (
-                    <><Camera size={14} /> Scan Receipt (OCR)</>
-                )}
-            </button>
+            <div className="flex gap-2 mt-4">
+                <input
+                    type="file"
+                    id="ocr-input"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                            performOcr(e.target.files[0]);
+                        }
+                    }}
+                    disabled={isScanning}
+                />
+                <label
+                    htmlFor="ocr-input"
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${isScanning ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-zinc-800 text-zinc-300 cursor-pointer'}`}
+                >
+                    {isScanning ? 'Scanning...' : <><Receipt size={14} /> OCR Scan</>}
+                </label>
+                <button 
+                    disabled={true}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${receiptImage ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}
+                >
+                    {receiptImage ? <><Check size={14} /> Receipt Added</> : <><Camera size={14} /> Add Receipt</>}
+                </button>
+            </div>
           </div>
 
           <div className="flex justify-center mb-4 mt-4">
@@ -129,7 +239,6 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
 
         <div className="p-6 space-y-8">
           
-          {/* Vendor & Category */}
           <div className="space-y-4">
             <div className="bg-zinc-900/50 p-1 rounded-xl flex gap-1 border border-white/5">
                 <input 
@@ -153,7 +262,6 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
             </div>
           </div>
 
-          {/* THE SPLIT SLIDER */}
           <div className="bg-zinc-900/40 rounded-2xl p-5 border border-white/5">
             <div className="flex justify-between items-end mb-4">
               <div className="text-left">
@@ -195,7 +303,6 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
               </div>
             </div>
 
-            {/* Property Selector for Passive Allocation */}
             {passiveAllocation > 0 && properties.length > 0 && (
                 <div className="bg-zinc-900/80 rounded-lg p-2 border border-white/5 flex items-center gap-2">
                     <span className="text-xs text-zinc-500 whitespace-nowrap pl-2">Assign to:</span>
@@ -217,14 +324,14 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
           <div className="pt-4 pb-8">
              <button 
                 onClick={handleLogTransaction} 
-                disabled={isSaving}
-                className="w-full py-4 rounded-xl bg-white text-black font-bold text-lg shadow-lg hover:bg-zinc-200 transition-colors flex items-center justify-center gap-2"
+                disabled={isSaving || isScanning}
+                className="w-full py-4 rounded-xl bg-white text-black font-bold text-lg shadow-lg hover:bg-zinc-200 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {isSaving ? (
                     <div className="w-6 h-6 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
                 ) : (
                     <>
-                        <Receipt size={20} />
+                        <UploadCloud size={20} />
                         Log Transaction
                     </>
                 )}

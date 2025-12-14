@@ -1,11 +1,12 @@
-import React from 'react';
-import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from 'recharts';
-import { LedgerType } from '../types';
-import { CHART_DATA_ACTIVE, CHART_DATA_PASSIVE, CHART_DATA_PERSONAL } from '../constants';
-import { TrendingUp, TrendingDown, DollarSign, Calendar } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts';
+import { LedgerType, Transaction } from '../types';
+import { TrendingUp, TrendingDown } from 'lucide-react';
+import { MONTH_NAMES } from '../constants';
 
 interface AnalyticsViewProps {
   mode: LedgerType;
+  transactions: Transaction[];
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -24,18 +25,52 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ mode }) => {
+export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ mode, transactions }) => {
   const isAgent = mode === 'active';
   const isPassive = mode === 'passive';
-  
-  const data = isAgent ? CHART_DATA_ACTIVE : isPassive ? CHART_DATA_PASSIVE : CHART_DATA_PERSONAL;
   const primaryColor = isAgent ? '#f43f5e' : isPassive ? '#06b6d4' : '#8b5cf6';
+
+  // Filter transactions for mode
+  const modeTransactions = useMemo(() => 
+    transactions.filter(t => t.type === mode), 
+  [transactions, mode]);
+
+  // Aggregate Data by Month (Last 6 Months)
+  const chartData = useMemo(() => {
+    const today = new Date();
+    const data = [];
+    for (let i = 5; i >= 0; i--) {
+        const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        const monthLabel = MONTH_NAMES[d.getMonth()];
+        
+        const monthTx = modeTransactions.filter(t => {
+            const tDate = new Date(t.date);
+            return tDate.getMonth() === d.getMonth() && tDate.getFullYear() === d.getFullYear();
+        });
+
+        if (isAgent || isPassive) {
+            // Revenue vs Expenses
+            const revenue = monthTx.reduce((acc, t) => t.amount > 0 ? acc + t.amount : acc, 0);
+            const expense = monthTx.reduce((acc, t) => t.amount < 0 ? acc + Math.abs(t.amount) : acc, 0);
+            data.push({ month: monthLabel, value: revenue, expense });
+        } else {
+            // Personal Spend
+            const spend = monthTx.reduce((acc, t) => t.amount < 0 ? acc + Math.abs(t.amount) : acc, 0);
+            data.push({ month: monthLabel, value: spend });
+        }
+    }
+    return data;
+  }, [modeTransactions, isAgent, isPassive]);
   
   // Calculations
-  const totalRevenue = data.reduce((acc, curr) => acc + curr.value, 0);
-  const totalExpenses = data.reduce((acc, curr) => acc + (curr.expense || 0), 0);
-  const netIncome = totalRevenue - totalExpenses;
-  const margin = Math.round((netIncome / totalRevenue) * 100);
+  const totalRevenue = chartData.reduce((acc, curr) => acc + (isAgent || isPassive ? curr.value : 0), 0);
+  const totalExpenses = chartData.reduce((acc, curr) => acc + (isAgent || isPassive ? (curr.expense || 0) : curr.value), 0);
+  
+  // For Personal, 'value' is actually expense/spend.
+  // For Active/Passive: Value is Revenue, Expense is Expense.
+  
+  const netIncome = isAgent || isPassive ? totalRevenue - totalExpenses : 0;
+  const margin = (isAgent || isPassive) && totalRevenue > 0 ? Math.round((netIncome / totalRevenue) * 100) : 0;
 
   return (
     <div className="space-y-6 animate-slide-up">
@@ -46,10 +81,10 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ mode }) => {
               <div className={`p-1.5 rounded-lg ${isAgent ? 'bg-rose-500/10 text-rose-500' : 'bg-cyan-500/10 text-cyan-500'}`}>
                 <TrendingUp size={16} />
               </div>
-              <span className="text-xs text-zinc-400 font-medium">Net Profit</span>
+              <span className="text-xs text-zinc-400 font-medium">{isAgent || isPassive ? 'Net Profit' : 'Total Spent'}</span>
            </div>
-           <p className="text-2xl font-bold text-white">${netIncome.toLocaleString()}</p>
-           <p className="text-xs text-emerald-500 mt-1">+14% vs last period</p>
+           <p className="text-2xl font-bold text-white">${(isAgent || isPassive ? netIncome : totalExpenses).toLocaleString()}</p>
+           {/* <p className="text-xs text-emerald-500 mt-1">+14% vs last period</p> */}
         </div>
         <div className="bg-zinc-900 border border-white/5 rounded-2xl p-4">
            <div className="flex items-center gap-2 mb-2">
@@ -59,7 +94,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ mode }) => {
               <span className="text-xs text-zinc-400 font-medium">Expenses</span>
            </div>
            <p className="text-2xl font-bold text-white">${totalExpenses.toLocaleString()}</p>
-           <p className="text-xs text-zinc-500 mt-1">Avg $1.2k / month</p>
+           <p className="text-xs text-zinc-500 mt-1">Last 6 Months</p>
         </div>
       </div>
 
@@ -71,15 +106,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ mode }) => {
           </h3>
           <select className="bg-zinc-800 text-xs text-white px-2 py-1 rounded-lg border border-white/10 outline-none">
             <option>Last 6 Months</option>
-            <option>YTD</option>
-            <option>All Time</option>
           </select>
         </div>
 
         <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
             {isAgent || isPassive ? (
-              <BarChart data={data}>
+              <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
                 <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#71717a', fontSize: 12}} />
                 <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
@@ -87,7 +120,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ mode }) => {
                 <Bar dataKey="expense" name="Expense" fill="#3f3f46" radius={[4, 4, 0, 0]} barSize={20} />
               </BarChart>
             ) : (
-              <LineChart data={data}>
+              <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
                 <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#71717a', fontSize: 12}} />
                 <Tooltip content={<CustomTooltip />} />
@@ -98,7 +131,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ mode }) => {
         </div>
       </div>
 
-      {/* Breakdown / Insights */}
+      {/* Breakdown / Insights - Only show margin for profit centers */}
+      {(isAgent || isPassive) && (
       <div className="bg-gradient-to-br from-zinc-900 to-zinc-900/50 border border-white/5 rounded-3xl p-6">
          <h3 className="font-bold text-white mb-4">Profit Margin</h3>
          <div className="flex items-end gap-4">
@@ -106,9 +140,10 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ mode }) => {
             <div className="pb-2 text-zinc-500 text-sm">Net margin this period</div>
          </div>
          <div className="mt-4 w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
-             <div className="h-full bg-emerald-500" style={{ width: `${margin}%` }}></div>
+             <div className="h-full bg-emerald-500" style={{ width: `${Math.max(0, margin)}%` }}></div>
          </div>
       </div>
+      )}
     </div>
   );
 };

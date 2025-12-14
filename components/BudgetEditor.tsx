@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BudgetCategory } from '../types';
-import { X, Plus, Save } from 'lucide-react';
+import { X, Plus, Save, Trash2 } from 'lucide-react';
 
 interface BudgetEditorProps {
   isOpen: boolean;
@@ -17,7 +17,7 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
 
   const handleLimitChange = (index: number, val: string) => {
     const updated = [...localBudget];
-    updated[index].limit = parseInt(val) || 0;
+    updated[index].limit = parseFloat(val) || 0; // Changed to parseFloat
     setLocalBudget(updated);
   };
 
@@ -26,6 +26,12 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
       setLocalBudget([...localBudget, { category: newCategoryName, spent: 0, limit: 100 }]);
       setNewCategoryName('');
     }
+  };
+
+  const handleRemoveCategory = (index: number) => {
+    const updated = [...localBudget];
+    updated.splice(index, 1);
+    setLocalBudget(updated);
   };
 
   const saveAndClose = () => {
@@ -45,13 +51,20 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
 
         <div className="space-y-4 max-h-[50vh] overflow-y-auto hide-scrollbar pr-1">
             {localBudget.map((item, idx) => (
-                <div key={idx} className="flex justify-between items-center gap-3 bg-zinc-800/50 p-3 rounded-xl border border-white/5">
+                <div key={idx} className="flex justify-between items-center gap-3 bg-zinc-800/50 p-3 rounded-xl border border-white/5 group">
+                    <button 
+                        onClick={() => handleRemoveCategory(idx)}
+                        className="p-1.5 rounded-lg text-zinc-600 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+                    >
+                        <Trash2 size={14} />
+                    </button>
                     <span className="text-sm font-medium text-white truncate flex-1">{item.category}</span>
                     <div className="flex items-center gap-2">
                         <span className="text-zinc-500 text-[10px] uppercase tracking-wider mr-1">Expected</span>
                         <span className="text-zinc-500 text-xs">$</span>
                         <input 
-                            type="number" 
+                            type="number" // Type number allows decimals by default in most browsers
+                            step="0.01" // Specify step for two decimal places
                             value={item.limit} 
                             onChange={(e) => handleLimitChange(idx, e.target.value)}
                             className="w-20 bg-black/30 border border-white/10 rounded px-2 py-1 text-right text-white text-sm focus:outline-none focus:border-violet-500"
@@ -59,6 +72,9 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
                     </div>
                 </div>
             ))}
+            {localBudget.length === 0 && (
+                <p className="text-zinc-500 text-center text-sm italic py-4">No categories set</p>
+            )}
         </div>
 
         <div className="mt-4 pt-4 border-t border-white/5">
