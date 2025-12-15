@@ -14,6 +14,7 @@ export interface UserProfile {
   cra_business_number?: string;
   sin_last_4?: string;
   is_pro_member?: boolean;
+  avatar_url?: string;
 }
 
 export interface Property {
@@ -50,8 +51,8 @@ export interface Transaction {
 export interface MileageLog {
     id?: string;
     date: string;
-    startLocation: string;
-    endLocation: string;
+    start_location: string;
+    end_location: string;
     purpose: string;
     distance: number; // in kilometers
     user_id?: string;

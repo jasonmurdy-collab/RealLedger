@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Receipt, Building, Briefcase, Calculator, Camera, Check, UploadCloud } from 'lucide-react';
+import { X, Receipt, Building, Briefcase, Calculator, Camera, Check, UploadCloud, Trash2 } from 'lucide-react';
 import { ComplianceAssistant } from './ComplianceAssistant';
 import { Property, Transaction, LedgerType } from '../types';
 import { ONTARIO_HST_RATE } from '../constants';
@@ -41,6 +41,7 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
     setIsScanning(true);
     setAmount('');
     setVendor('');
+    setReceiptImage(URL.createObjectURL(file)); // Show local preview immediately
 
     try {
       const base64Image = await fileToBase64(file);
@@ -80,13 +81,11 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
 
       if (parsedData.vendor) setVendor(parsedData.vendor);
       if (parsedData.amount) setAmount(parsedData.amount.toString());
-
-      // Simulate capturing the image for the UI
-      setReceiptImage("data:image/png;base64," + base64Image);
-
+      
     } catch (error) {
       console.error("OCR Scan failed:", error);
       // You could set an error state here to show in the UI
+      setReceiptImage(null); // Clear preview on error
     } finally {
       setIsScanning(false);
     }
@@ -94,70 +93,75 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
   
   const handleLogTransaction = async () => {
     setIsSaving(true);
-    const numAmount = parseFloat(amount) || 0;
-    const isSplit = splitRatio > 0 && splitRatio < 100;
-    const date = new Date().toISOString().split('T')[0];
-    
-    // This will be a mock URL. In a real app, you'd upload the base64 image to Supabase Storage and get a public URL.
-    const mockReceiptUrl = receiptImage ? `https://storage.supabase.com/receipts/${Date.now()}.jpg` : undefined;
-
-    if (isSplit) {
-      const hstAmount = includeHST ? numAmount - (numAmount / (1 + ONTARIO_HST_RATE)) : 0;
-      const subtotal = numAmount - hstAmount;
+    try {
+      const numAmount = parseFloat(amount) || 0;
+      const isSplit = splitRatio > 0 && splitRatio < 100;
+      const date = new Date().toISOString().split('T')[0];
       
-      const activeAllocation = subtotal * (splitRatio / 100);
-      const passiveAllocation = subtotal * ((100 - splitRatio) / 100);
-      
-      const activeHst = hstAmount * (splitRatio / 100);
-      const passiveHst = hstAmount * ((100 - splitRatio) / 100);
+      // This will be a mock URL. In a real app, you'd upload the base64 image to Supabase Storage and get a public URL.
+      const mockReceiptUrl = receiptImage ? `https://storage.supabase.com/receipts/${Date.now()}.jpg` : undefined;
 
-      const transactionsToCreate: Omit<Transaction, 'id' | 'status'>[] = [];
+      if (isSplit) {
+        const hstAmount = includeHST ? numAmount - (numAmount / (1 + ONTARIO_HST_RATE)) : 0;
+        const subtotal = numAmount - hstAmount;
+        
+        const activeAllocation = subtotal * (splitRatio / 100);
+        const passiveAllocation = subtotal * ((100 - splitRatio) / 100);
+        
+        const activeHst = hstAmount * (splitRatio / 100);
+        const passiveHst = hstAmount * ((100 - splitRatio) / 100);
 
-      if (activeAllocation > 0) {
-        transactionsToCreate.push({
+        const transactionsToCreate: Omit<Transaction, 'id' | 'status'>[] = [];
+
+        if (activeAllocation > 0) {
+          transactionsToCreate.push({
+            date, vendor, category,
+            amount: -(activeAllocation + activeHst),
+            type: 'active' as LedgerType,
+            taxForm: 't2125',
+            isSplit: true,
+            hstIncluded: includeHST,
+            hstAmount: activeHst,
+            receiptUrl: mockReceiptUrl,
+          });
+        }
+        
+        if (passiveAllocation > 0) {
+          transactionsToCreate.push({
+            date, vendor, category,
+            amount: -(passiveAllocation + passiveHst),
+            type: 'passive' as LedgerType,
+            taxForm: 't776',
+            isSplit: true,
+            hstIncluded: includeHST,
+            hstAmount: passiveHst,
+            propertyId: selectedProperty,
+            receiptUrl: mockReceiptUrl,
+          });
+        }
+        await onAddTransaction(transactionsToCreate);
+
+      } else {
+        const primaryType = splitRatio === 100 ? 'active' : 'passive';
+        const newTransaction: Omit<Transaction, 'id' | 'status'> = {
           date, vendor, category,
-          amount: -(activeAllocation + activeHst),
-          type: 'active' as LedgerType,
-          taxForm: 't2125',
-          isSplit: true,
+          amount: -numAmount,
+          type: primaryType,
+          isSplit: false,
           hstIncluded: includeHST,
-          hstAmount: activeHst,
+          propertyId: primaryType === 'passive' ? selectedProperty : undefined,
+          taxForm: primaryType === 'active' ? 't2125' : 't776',
           receiptUrl: mockReceiptUrl,
-        });
+        };
+        await onAddTransaction(newTransaction);
       }
-      
-      if (passiveAllocation > 0) {
-        transactionsToCreate.push({
-          date, vendor, category,
-          amount: -(passiveAllocation + passiveHst),
-          type: 'passive' as LedgerType,
-          taxForm: 't776',
-          isSplit: true,
-          hstIncluded: includeHST,
-          hstAmount: passiveHst,
-          propertyId: selectedProperty,
-          receiptUrl: mockReceiptUrl,
-        });
-      }
-      await onAddTransaction(transactionsToCreate);
-
-    } else {
-      const primaryType = splitRatio === 100 ? 'active' : 'passive';
-      const newTransaction: Omit<Transaction, 'id' | 'status'> = {
-        date, vendor, category,
-        amount: -numAmount,
-        type: primaryType,
-        isSplit: false,
-        hstIncluded: includeHST,
-        propertyId: primaryType === 'passive' ? selectedProperty : undefined,
-        taxForm: primaryType === 'active' ? 't2125' : 't776',
-        receiptUrl: mockReceiptUrl,
-      };
-      await onAddTransaction(newTransaction);
+      onClose();
+    } catch (error) {
+      console.error("Failed to log transaction:", error);
+      // You could display an error toast here
+    } finally {
+      setIsSaving(false);
     }
-    
-    setIsSaving(false);
-    onClose();
   };
 
   const numAmount = parseFloat(amount) || 0;
@@ -165,6 +169,12 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
   const subtotal = numAmount - hstAmount;
   const activeAllocation = (subtotal * (splitRatio / 100));
   const passiveAllocation = (subtotal * ((100 - splitRatio) / 100));
+  
+  const handleRemoveReceipt = () => {
+    setReceiptImage(null);
+    const fileInput = document.getElementById('ocr-input') as HTMLInputElement;
+    if (fileInput) fileInput.value = '';
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
@@ -197,36 +207,49 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
                 autoFocus={!isScanning}
                 />
             </div>
-            
-            <div className="flex gap-2 mt-4">
-                <input
-                    type="file"
-                    id="ocr-input"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                            performOcr(e.target.files[0]);
-                        }
-                    }}
-                    disabled={isScanning}
-                />
-                <label
-                    htmlFor="ocr-input"
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${isScanning ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-zinc-800 text-zinc-300 cursor-pointer'}`}
-                >
-                    {isScanning ? 'Scanning...' : <><Receipt size={14} /> OCR Scan</>}
-                </label>
-                <button 
-                    disabled={true}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${receiptImage ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}
-                >
-                    {receiptImage ? <><Check size={14} /> Receipt Added</> : <><Camera size={14} /> Add Receipt</>}
-                </button>
-            </div>
           </div>
+        </div>
 
-          <div className="flex justify-center mb-4 mt-4">
+        <div className="p-6 pt-2 space-y-8">
+          
+          <div className="space-y-4">
+            <input
+              type="file"
+              id="ocr-input"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                      performOcr(e.target.files[0]);
+                  }
+              }}
+              disabled={isScanning || !!receiptImage}
+            />
+            {!receiptImage ? (
+                <label htmlFor="ocr-input" className="cursor-pointer w-full h-24 bg-zinc-900/50 border-2 border-dashed border-zinc-700 rounded-xl flex flex-col items-center justify-center text-zinc-500 hover:border-rose-500 hover:text-rose-500 transition-colors">
+                    <Receipt size={24} />
+                    <span className="text-sm font-semibold mt-2">Scan Receipt with AI</span>
+                </label>
+            ) : (
+                <div className="relative w-full h-24 rounded-xl overflow-hidden group">
+                    <img src={receiptImage} alt="Receipt preview" className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100">
+                        {isScanning ? (
+                             <div className="flex items-center gap-2 text-white">
+                                <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></div>
+                                Scanning...
+                             </div>
+                        ) : (
+                            <button onClick={handleRemoveReceipt} className="p-2 bg-rose-500/80 text-white rounded-full">
+                                <Trash2 size={18}/>
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+
+            <div className="flex justify-center">
              <button 
                 onClick={() => setIncludeHST(!includeHST)}
                 className={`text-xs font-semibold px-3 py-1 rounded-full transition-colors flex items-center gap-1 ${includeHST ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' : 'bg-zinc-800 text-zinc-500'}`}
@@ -235,11 +258,7 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
                 {includeHST ? `HST ($${(hstAmount).toFixed(2)}) Included` : 'No HST'}
              </button>
           </div>
-        </div>
 
-        <div className="p-6 space-y-8">
-          
-          <div className="space-y-4">
             <div className="bg-zinc-900/50 p-1 rounded-xl flex gap-1 border border-white/5">
                 <input 
                     type="text" 

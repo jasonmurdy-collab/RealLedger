@@ -120,7 +120,7 @@ export default function App() {
         supabase.from('transactions').select('*').order('date', { ascending: false }),
         supabase.from('accounts').select('*'),
         supabase.from('properties').select('*'),
-        supabase.from('profiles').select('*').eq('id', user.id).single(),
+        supabase.from('profiles').select('*, avatar_url').eq('id', user.id).single(),
         supabase.from('mileage_logs').select('*').order('date', { ascending: false }),
     ]);
     
@@ -132,7 +132,7 @@ export default function App() {
     if (propRes.data) setProperties(propRes.data);
     if (mileRes.data) setMileageLogs(mileRes.data);
     if (profRes.data) setUserProfile(profRes.data);
-    else setUserProfile({ id: user.id, full_name: '', role: 'Real Estate Professional' });
+    else setUserProfile({ id: user.id, full_name: '', role: 'Real Estate Professional', avatar_url: '' });
   };
   
   const isAuthenticated = session !== null;
@@ -180,29 +180,36 @@ export default function App() {
   };
 
   const handleAddTransaction = async (txData: Omit<Transaction, 'id' | 'status'> | Omit<Transaction, 'id' | 'status'>[]) => {
-    if (!session?.user) return;
+    if (!session?.user) throw new Error("User not authenticated.");
     const txs = Array.isArray(txData) ? txData : [txData];
     const payload = txs.map(t => ({ ...t, user_id: session.user.id }));
-    const { data } = await supabase.from('transactions').insert(payload).select();
+    const { data, error } = await supabase.from('transactions').insert(payload).select();
+    if (error) {
+      console.error("Supabase Error: Failed to add transaction:", error);
+      throw new Error("Failed to add transaction.");
+    }
     if (data) setTransactions(prev => [...data, ...prev]);
   };
   
   const handleAddMileageLog = async (log: Omit<MileageLog, 'id'>) => {
-    if (!session?.user) return;
+    if (!session?.user) throw new Error("User not authenticated.");
     const payload = { ...log, user_id: session.user.id };
-    const { data } = await supabase.from('mileage_logs').insert([payload]).select();
+    const { data, error } = await supabase.from('mileage_logs').insert([payload]).select();
+    if (error) {
+      console.error("Supabase Error: Failed to add mileage log:", error);
+      throw new Error(error.message);
+    }
     if(data) setMileageLogs(prev => [data[0], ...prev]);
   };
 
   const handleSaveBudget = async (newBudget: BudgetCategory[]) => {
-      if (!session?.user) return;
+      if (!session?.user) throw new Error("User not authenticated.");
       
       // 1. Delete all existing for this user
       const { error: deleteError } = await supabase.from('budget_categories').delete().eq('user_id', session.user.id);
       if (deleteError) {
           console.error("Error deleting old budget categories:", deleteError);
-          await fetchBudgets(); // Revert local state if delete failed
-          return;
+          throw new Error("Failed to clear old budget. Changes aborted.");
       }
       
       // 2. Insert new list
@@ -217,24 +224,64 @@ export default function App() {
           const { error: insertError } = await supabase.from('budget_categories').insert(payload);
           if (insertError) {
               console.error("Error inserting new budget categories:", insertError);
+              throw new Error("Failed to save new budget categories.");
           }
       }
       
-      // Always refetch to ensure UI reflects the final state from the server after all operations.
+      // Only proceed to re-fetch if both delete and insert were successful
       await fetchBudgets(); 
   };
 
   const handleAddProperty = async (newProp: Omit<Property, 'id'>) => {
-      if (!session?.user) return;
-      const { data } = await supabase.from('properties').insert([{ ...newProp, user_id: session.user.id }]).select();
+      if (!session?.user) throw new Error("User not authenticated.");
+      const { data, error } = await supabase.from('properties').insert([{ ...newProp, user_id: session.user.id }]).select();
+      if (error) {
+        console.error("Supabase Error: Failed to add property:", error);
+        throw new Error("Failed to add property.");
+      }
       if (data) setProperties(prev => [...prev, data[0]]);
   };
 
   const handleUpdateProfile = async (profile: UserProfile) => {
-      if (!session?.user) return;
-      const { data } = await supabase.from('profiles').upsert({ ...profile, id: session.user.id }).select();
-      if (data) setUserProfile(data[0]);
+      if (!session?.user) throw new Error("User not authenticated.");
+      const { data, error } = await supabase
+        .from('profiles')
+        .upsert({ ...profile, id: session.user.id })
+        .select()
+        .single();
+      
+      if (error) {
+        console.error("Supabase profile update error:", error);
+        throw new Error(error.message); // Throw the specific Supabase error message
+      }
+
+      if (data) setUserProfile(data);
   }
+
+  const handleProfilePictureUpload = async (file: File) => {
+    if (!session?.user) throw new Error("User not authenticated.");
+    const filePath = `${session.user.id}/avatar.png`;
+
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true
+    });
+    
+    if (uploadError) {
+        console.error("Avatar upload error:", uploadError);
+        throw new Error("Failed to upload avatar.");
+    }
+
+    const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
+
+    if (!data.publicUrl) {
+        throw new Error("Could not get public URL for avatar.");
+    }
+    
+    // Add a timestamp to bust the cache
+    const avatarUrl = `${data.publicUrl}?t=${new Date().getTime()}`;
+    await handleUpdateProfile({ ...userProfile!, avatar_url: avatarUrl });
+  };
   
   if (!isAuthenticated) return <AuthScreen />;
 
@@ -276,7 +323,7 @@ export default function App() {
           );
           case 'analytics': return <AnalyticsView mode={ledgerMode} transactions={transactions} />;
           case 'mileage': return <MileageView logs={mileageLogs} onAddTrip={() => setIsMileageModalOpen(true)} />;
-          case 'profile': return <ProfileView accounts={accounts} profile={userProfile} onLogout={() => supabase.auth.signOut()} onConnectBank={() => setIsBankModalOpen(true)} onUpdateProfile={handleUpdateProfile}/>;
+          case 'profile': return <ProfileView accounts={accounts} profile={userProfile} onLogout={() => supabase.auth.signOut()} onConnectBank={() => setIsBankModalOpen(true)} onUpdateProfile={handleUpdateProfile} onUploadAvatar={handleProfilePictureUpload} />;
           default: return null;
       }
   }

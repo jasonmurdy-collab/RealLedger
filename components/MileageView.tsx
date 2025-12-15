@@ -56,7 +56,7 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
                             <p className="font-semibold text-white mb-1">{log.purpose}</p>
                             <div className="flex items-center gap-2 text-xs text-zinc-400">
                                 <MapPin size={12} />
-                                <span>{log.startLocation} → {log.endLocation}</span>
+                                <span>{log.start_location} → {log.end_location}</span>
                             </div>
                         </div>
                         <div className="text-right">

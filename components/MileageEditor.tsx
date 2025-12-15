@@ -14,20 +14,28 @@ export const MileageEditor: React.FC<MileageEditorProps> = ({ isOpen, onClose, o
   const [purpose, setPurpose] = useState('');
   const [distance, setDistance] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const handleSubmit = async () => {
     setIsSaving(true);
-    await onSave({
-      date: new Date().toISOString().split('T')[0],
-      startLocation,
-      endLocation,
-      purpose,
-      distance: parseFloat(distance) || 0,
-    });
-    setIsSaving(false);
-    onClose();
+    setError(null);
+    try {
+      await onSave({
+        date: new Date().toISOString().split('T')[0],
+        start_location: startLocation,
+        end_location: endLocation,
+        purpose,
+        distance: parseFloat(distance) || 0,
+      });
+      onClose();
+    } catch (err: any) {
+        console.error("Failed to save mileage log:", err);
+        setError(err.message || "Could not save trip. Please try again.");
+    } finally {
+        setIsSaving(false);
+    }
   };
 
   return (
@@ -92,12 +100,20 @@ export const MileageEditor: React.FC<MileageEditorProps> = ({ isOpen, onClose, o
            </div>
         </div>
 
+        {error && (
+            <p className="text-xs text-rose-500 text-center bg-rose-500/10 p-2 rounded-lg mt-4">{error}</p>
+        )}
+
         <button 
             onClick={handleSubmit} 
             disabled={!purpose || !distance || isSaving}
             className="w-full mt-6 py-3 bg-white text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-zinc-200 transition-colors disabled:opacity-50"
         >
-            {isSaving ? 'Saving...' : <><Save size={18} /> Add Trip Log</>}
+            {isSaving ? (
+                <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+            ) : (
+                <><Save size={18} /> Add Trip Log</>
+            )}
         </button>
       </div>
     </div>

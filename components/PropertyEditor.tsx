@@ -5,7 +5,7 @@ import { X, Save, Home, DollarSign, Users, Calendar } from 'lucide-react';
 interface PropertyEditorProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (property: Omit<Property, 'id'>) => void;
+  onSave: (property: Omit<Property, 'id'>) => Promise<void>;
 }
 
 export const PropertyEditor: React.FC<PropertyEditorProps> = ({ isOpen, onClose, onSave }) => {
@@ -20,17 +20,23 @@ export const PropertyEditor: React.FC<PropertyEditorProps> = ({ isOpen, onClose,
 
   const handleSubmit = async () => {
     setIsSaving(true);
-    await onSave({
-      address,
-      purchasePrice: parseFloat(purchasePrice) || 0,
-      currentValue: parseFloat(currentValue) || 0,
-      ccaClass: 1, // Default to Class 1 for Real Estate
-      uccBalance: (parseFloat(purchasePrice) || 0) * 0.96, // Mock initial UCC
-      tenantName: tenantName || 'Vacant',
-      leaseEnd: leaseEnd || '-'
-    });
-    setIsSaving(false);
-    onClose();
+    try {
+      await onSave({
+        address,
+        purchasePrice: parseFloat(purchasePrice) || 0,
+        currentValue: parseFloat(currentValue) || 0,
+        ccaClass: 1, // Default to Class 1 for Real Estate
+        uccBalance: (parseFloat(purchasePrice) || 0) * 0.96, // Mock initial UCC
+        tenantName: tenantName || 'Vacant',
+        leaseEnd: leaseEnd || '-'
+      });
+      onClose();
+    } catch (error) {
+      console.error("Failed to save property:", error);
+      // Optionally show a toast/error message to the user
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -122,7 +128,11 @@ export const PropertyEditor: React.FC<PropertyEditorProps> = ({ isOpen, onClose,
             disabled={!address || !purchasePrice || isSaving}
             className="w-full mt-6 py-3 bg-white text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-zinc-200 transition-colors disabled:opacity-50"
         >
-            {isSaving ? 'Saving...' : <><Save size={18} /> Add Property</>}
+            {isSaving ? (
+                 <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+            ) : (
+                <><Save size={18} /> Add Property</>
+            )}
         </button>
       </div>
     </div>

@@ -6,12 +6,13 @@ interface BudgetEditorProps {
   isOpen: boolean;
   onClose: () => void;
   budgetData: BudgetCategory[];
-  onSave: (newBudget: BudgetCategory[]) => void;
+  onSave: (newBudget: BudgetCategory[]) => Promise<void>;
 }
 
 export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, budgetData, onSave }) => {
   const [localBudget, setLocalBudget] = useState<BudgetCategory[]>(JSON.parse(JSON.stringify(budgetData)));
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   
   if (!isOpen) return null;
 
@@ -34,9 +35,17 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
     setLocalBudget(updated);
   };
 
-  const saveAndClose = () => {
-    onSave(localBudget);
-    onClose();
+  const saveAndClose = async () => {
+    setIsSaving(true);
+    try {
+      await onSave(localBudget);
+      onClose();
+    } catch (error) {
+      console.error("Failed to save budget:", error);
+      // Optionally show a toast/error message to the user
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -94,8 +103,16 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
                 </button>
             </div>
 
-            <button onClick={saveAndClose} className="w-full py-3 bg-white text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-zinc-200 transition-colors">
-                <Save size={18} /> Save Expectations
+            <button 
+              onClick={saveAndClose} 
+              disabled={isSaving}
+              className="w-full py-3 bg-white text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-zinc-200 transition-colors disabled:opacity-50"
+            >
+              {isSaving ? (
+                <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+              ) : (
+                <><Save size={18} /> Save Expectations</>
+              )}
             </button>
         </div>
       </div>
