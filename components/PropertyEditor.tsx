@@ -15,6 +15,7 @@ export const PropertyEditor: React.FC<PropertyEditorProps> = ({ isOpen, onClose,
   const [tenantName, setTenantName] = useState('');
   const [leaseEnd, setLeaseEnd] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [mortgageBalance, setMortgageBalance] = useState('');
 
   if (!isOpen) return null;
 
@@ -28,7 +29,8 @@ export const PropertyEditor: React.FC<PropertyEditorProps> = ({ isOpen, onClose,
         ccaClass: 1, // Default to Class 1 for Real Estate
         uccBalance: (parseFloat(purchasePrice) || 0) * 0.96, // Mock initial UCC
         tenantName: tenantName || 'Vacant',
-        leaseEnd: leaseEnd || '-'
+        leaseEnd: leaseEnd || '-',
+        mortgageBalance: parseFloat(mortgageBalance) || 0,
       });
       onClose();
     } catch (error) {
@@ -90,6 +92,18 @@ export const PropertyEditor: React.FC<PropertyEditorProps> = ({ isOpen, onClose,
                 </div>
              </div>
           </div>
+          <div>
+    <label className="text-xs text-zinc-500 ml-1 mb-1 block">Mortgage Balance</label>
+    <div className="relative">
+        <DollarSign size={14} className="absolute left-3 top-3.5 text-zinc-500" />
+        <input 
+        type="number" 
+        value={mortgageBalance}
+        onChange={(e) => setMortgageBalance(e.target.value)}
+        className="w-full bg-zinc-800/50 border border-white/10 rounded-xl pl-8 pr-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors"
+        />
+    </div>
+</div>
 
           <div className="border-t border-white/5 pt-4">
              <h4 className="text-sm font-medium text-zinc-400 mb-3">Tenant Information</h4>

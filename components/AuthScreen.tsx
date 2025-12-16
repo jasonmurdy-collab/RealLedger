@@ -4,8 +4,8 @@ import { ArrowRight, UserPlus, Fingerprint } from 'lucide-react';
 
 export const AuthScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState('agent@realledger.ca');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSignUp, setIsSignUp] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);

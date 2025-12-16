@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Settings, CreditCard, Lock, HelpCircle, ChevronRight, LogOut, ShieldCheck, FileText, Plus, Edit2, Save, X, Camera, UploadCloud } from 'lucide-react';
+import { User, Settings, CreditCard, Lock, HelpCircle, ChevronRight, LogOut, ShieldCheck, FileText, Plus, Edit2, Save, X, Camera, UploadCloud, Trash2 } from 'lucide-react';
 import { BankAccount, UserProfile } from '../types';
 import { ProUpgradeModal } from './ProUpgradeModal';
 
@@ -12,9 +12,10 @@ interface ProfileViewProps {
   onConnectBank: () => void;
   onUpdateProfile: (profile: UserProfile) => Promise<void>;
   onUploadAvatar: (file: File) => Promise<void>;
+  onDeleteAccount: (accountId: string) => Promise<void>;
 }
 
-export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onLogout, onConnectBank, onUpdateProfile, onUploadAvatar }) => {
+export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onLogout, onConnectBank, onUpdateProfile, onUploadAvatar, onDeleteAccount }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<UserProfile>({
     full_name: '',
@@ -107,6 +108,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
     setIsEditing(true);
     setSaveStatus('idle');
     setSaveError(null);
+  }
+
+  const handleDeleteAccount = async (accountId: string) => {
+    try {
+      await onDeleteAccount(accountId);
+    } catch (error: any) {
+      setSaveStatus('error');
+      setSaveError(error.message || "Failed to remove account.");
+    }
   }
 
   return (
@@ -244,15 +254,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
           </div>
           <div className="bg-zinc-900 border border-white/5 rounded-2xl overflow-hidden">
              {accounts.length > 0 ? accounts.map((acc, index) => (
-                <React.Fragment key={acc.id}>
-                    <SettingItem 
-                        icon={<CreditCard size={18} />} 
-                        label={`${acc.institution} ${acc.type}`} 
-                        value={`**** ${acc.mask}`} 
-                        subValue={acc.defaultContext ? acc.defaultContext.charAt(0).toUpperCase() + acc.defaultContext.slice(1) : undefined}
-                    />
-                    {index < accounts.length - 1 && <div className="h-px bg-white/5" />}
-                </React.Fragment>
+                <div key={acc.id} className="flex items-center">
+                    <div className="flex-grow">
+                        <SettingItem 
+                            icon={<CreditCard size={18} />} 
+                            label={`${acc.institution} ${acc.type}`} 
+                            value={`**** ${acc.mask}`} 
+                            subValue={acc.defaultContext ? acc.defaultContext.charAt(0).toUpperCase() + acc.defaultContext.slice(1) : undefined}
+                        />
+                    </div>
+                    {isEditing && (
+                        <button 
+                            onClick={() => handleDeleteAccount(acc.id)}
+                            className="p-3 text-zinc-500 hover:text-rose-500 transition-colors mr-2"
+                            aria-label={`Delete ${acc.institution} account`}
+                        >
+                            <Trash2 size={16} />
+                        </button>
+                    )}
+                    {index < accounts.length - 1 && !isEditing && <div className="h-px bg-white/5" />}
+                </div>
              )) : (
                  <div className="p-4 text-center text-zinc-500 text-sm">No accounts connected</div>
              )}
@@ -294,7 +315,7 @@ const SettingItem = ({ icon, label, value, subValue, onClick }: { icon: React.Re
     <div className="flex items-center gap-2">
       {value && <span className="text-sm text-zinc-400">{value}</span>}
       {subValue && <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded-full">{subValue}</span>}
-      <ChevronRight size={16} className="text-zinc-500" />
+      {onClick && <ChevronRight size={16} className="text-zinc-500" />}
     </div>
   </button>
 );

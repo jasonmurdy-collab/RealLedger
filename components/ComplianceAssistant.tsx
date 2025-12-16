@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Bot, Wifi, Car, FileText } from 'lucide-react';
+import { GoogleGenAI } from "@google/genai";
 
 interface ComplianceAssistantProps {
   category: string;
@@ -12,35 +13,46 @@ export const ComplianceAssistant: React.FC<ComplianceAssistantProps> = ({ catego
   const [message, setMessage] = useState<string | null>(null);
   const [showActions, setShowActions] = useState(false);
 
-  // Simulate AI "Thinking" based on category
-  useEffect(() => {
-    if (!isVisible) return;
+useEffect(() => {
+    if (!isVisible || !amount || !category) return;
     
-    // Reset state
-    setIsTyping(false);
-    setMessage(null);
-    setShowActions(false);
+    // Simple debounce to avoid spamming API while typing amounts
+    const timer = setTimeout(async () => {
+        setIsTyping(true);
+        setMessage(null);
+        setShowActions(false);
 
-    const cat = category.toLowerCase();
-    
-    if (cat.includes('repair') || cat.includes('renovation') || amount > 1000) {
-      triggerAi("Compliance Check 🧐: For T776 line 9960, is this a current expense (patch) or capital improvement (CCA Class 1)?");
-      setShowActions(true);
-    } else if (cat.includes('fuel') || cat.includes('auto') || cat.includes('vehicle')) {
-      triggerAi("Vehicle Expense 🚗: Are you tracking mileage? CRA requires a detailed logbook to claim the business portion on Form T2125.");
-    } else if (cat.includes('meal') || cat.includes('entertainment')) {
-      triggerAi("Meals & Ent 🍔: Remember, only 50% of this amount is deductible for business purposes. I'll auto-adjust the T2125 entry.");
-    }
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+            const prompt = `
+                I am a Canadian Real Estate Agent. I just spent $${amount} on "${category}".
+                Is this likely a current expense (fully deductible) or a capital expense (CCA)? 
+                And are there any specific CRA compliance warnings I should know (like meals 50%, mileage logs, etc)?
+                Keep the answer under 20 words. Be direct.
+            `;
 
+            const result = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: prompt
+            });
+            
+            const responseText = result.text;
+            setMessage(responseText);
+            
+            // Simple keyword check to show actions
+            if (responseText && (responseText.toLowerCase().includes('capital') || responseText.toLowerCase().includes('cca'))) {
+                setShowActions(true);
+            }
+        } catch (err) {
+            console.error(err);
+            setMessage("Could not connect to AI Compliance service.");
+        } finally {
+            setIsTyping(false);
+        }
+    }, 1000); // 1 second delay
+
+    return () => clearTimeout(timer);
   }, [category, amount, isVisible]);
-
-  const triggerAi = (msg: string) => {
-    setIsTyping(true);
-    setTimeout(() => {
-      setIsTyping(false);
-      setMessage(msg);
-    }, 1200);
-  };
 
   if (!isVisible || (!isTyping && !message)) return null;
 

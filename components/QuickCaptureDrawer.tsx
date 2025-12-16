@@ -4,6 +4,7 @@ import { ComplianceAssistant } from './ComplianceAssistant';
 import { Property, Transaction, LedgerType } from '../types';
 import { ONTARIO_HST_RATE } from '../constants';
 import { GoogleGenAI, Type } from "@google/genai";
+import { supabase } from '../supabaseClient';
 
 interface QuickCaptureDrawerProps {
   isOpen: boolean;
@@ -91,74 +92,98 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
     }
   };
   
-  const handleLogTransaction = async () => {
+const handleLogTransaction = async () => {
     setIsSaving(true);
     try {
       const numAmount = parseFloat(amount) || 0;
+      if (numAmount === 0) return;
+
       const isSplit = splitRatio > 0 && splitRatio < 100;
       const date = new Date().toISOString().split('T')[0];
       
-      // This will be a mock URL. In a real app, you'd upload the base64 image to Supabase Storage and get a public URL.
-      const mockReceiptUrl = receiptImage ? `https://storage.supabase.com/receipts/${Date.now()}.jpg` : undefined;
+      let finalReceiptUrl: string | undefined = undefined;
+
+      if (receiptImage) {
+        const response = await fetch(receiptImage);
+        const blob = await response.blob();
+        const fileExt = blob.type.split('/')[1] || 'jpg';
+        const fileName = `${Date.now()}.${fileExt}`;
+        const user = (await supabase.auth.getUser()).data.user;
+        if (!user) throw new Error("User not found");
+
+        const filePath = `${user.id}/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('receipts')
+          .upload(filePath, blob);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+          .from('receipts')
+          .getPublicUrl(filePath);
+        
+        finalReceiptUrl = urlData.publicUrl;
+      }
+      
+      const hstAmount = includeHST ? numAmount - (numAmount / (1 + ONTARIO_HST_RATE)) : 0;
+      const subtotal = numAmount - hstAmount;
+      const activeAllocation = (subtotal * (splitRatio / 100));
+      const passiveAllocation = (subtotal * ((100 - splitRatio) / 100));
 
       if (isSplit) {
-        const hstAmount = includeHST ? numAmount - (numAmount / (1 + ONTARIO_HST_RATE)) : 0;
-        const subtotal = numAmount - hstAmount;
-        
-        const activeAllocation = subtotal * (splitRatio / 100);
-        const passiveAllocation = subtotal * ((100 - splitRatio) / 100);
-        
-        const activeHst = hstAmount * (splitRatio / 100);
-        const passiveHst = hstAmount * ((100 - splitRatio) / 100);
-
         const transactionsToCreate: Omit<Transaction, 'id' | 'status'>[] = [];
-
         if (activeAllocation > 0) {
-          transactionsToCreate.push({
-            date, vendor, category,
-            amount: -(activeAllocation + activeHst),
-            type: 'active' as LedgerType,
-            taxForm: 't2125',
-            isSplit: true,
-            hstIncluded: includeHST,
-            hstAmount: activeHst,
-            receiptUrl: mockReceiptUrl,
-          });
+           transactionsToCreate.push({
+             date,
+             vendor,
+             amount: -activeAllocation,
+             type: 'active',
+             category,
+             taxForm: 't2125',
+             isSplit: true,
+             hstIncluded: includeHST,
+             hstAmount: hstAmount * (splitRatio / 100),
+             receiptUrl: finalReceiptUrl, 
+           });
         }
-        
         if (passiveAllocation > 0) {
-          transactionsToCreate.push({
-            date, vendor, category,
-            amount: -(passiveAllocation + passiveHst),
-            type: 'passive' as LedgerType,
-            taxForm: 't776',
-            isSplit: true,
-            hstIncluded: includeHST,
-            hstAmount: passiveHst,
-            propertyId: selectedProperty,
-            receiptUrl: mockReceiptUrl,
-          });
+           transactionsToCreate.push({
+             date,
+             vendor,
+             amount: -passiveAllocation,
+             type: 'passive',
+             category,
+             taxForm: 't776',
+             isSplit: true,
+             propertyId: selectedProperty,
+             hstIncluded: includeHST,
+             hstAmount: hstAmount * ((100 - splitRatio) / 100),
+             receiptUrl: finalReceiptUrl,
+           });
         }
         await onAddTransaction(transactionsToCreate);
-
       } else {
-        const primaryType = splitRatio === 100 ? 'active' : 'passive';
+        const ledgerType: LedgerType = splitRatio === 100 ? 'active' : 'passive';
         const newTransaction: Omit<Transaction, 'id' | 'status'> = {
-          date, vendor, category,
+          date,
+          vendor,
           amount: -numAmount,
-          type: primaryType,
+          type: ledgerType,
+          category,
+          taxForm: ledgerType === 'active' ? 't2125' : 't776',
           isSplit: false,
+          propertyId: ledgerType === 'passive' ? selectedProperty : undefined,
           hstIncluded: includeHST,
-          propertyId: primaryType === 'passive' ? selectedProperty : undefined,
-          taxForm: primaryType === 'active' ? 't2125' : 't776',
-          receiptUrl: mockReceiptUrl,
+          hstAmount,
+          receiptUrl: finalReceiptUrl,
         };
         await onAddTransaction(newTransaction);
       }
       onClose();
     } catch (error) {
       console.error("Failed to log transaction:", error);
-      // You could display an error toast here
+      alert("Error saving transaction. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -343,7 +368,7 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
           <div className="pt-4 pb-8">
              <button 
                 onClick={handleLogTransaction} 
-                disabled={isSaving || isScanning}
+                disabled={isSaving || isScanning || numAmount === 0 || !vendor}
                 className="w-full py-4 rounded-xl bg-white text-black font-bold text-lg shadow-lg hover:bg-zinc-200 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {isSaving ? (

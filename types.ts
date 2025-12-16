@@ -27,6 +27,7 @@ export interface Property {
   tenantName: string;
   leaseEnd: string;
   user_id?: string;
+  mortgageBalance?: number;
 }
 
 export interface Transaction {

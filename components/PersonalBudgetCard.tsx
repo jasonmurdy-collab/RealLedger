@@ -1,6 +1,8 @@
 import React from 'react';
 import { BudgetCategory } from '../types';
-import { AlertTriangle, check, CheckCircle2, Sparkles, Pencil } from 'lucide-react';
+// FIX: Corrected import from lucide-react, 'check' to 'Check'.
+import { AlertTriangle, Check, CheckCircle2, Sparkles, Pencil } from 'lucide-react';
+import { MONTH_NAMES } from '../constants';
 
 interface PersonalBudgetCardProps {
   budgetData: BudgetCategory[];
@@ -10,13 +12,17 @@ interface PersonalBudgetCardProps {
 export const PersonalBudgetCard: React.FC<PersonalBudgetCardProps> = ({ budgetData, onEdit }) => {
   const totalSpent = budgetData.reduce((acc, curr) => acc + curr.spent, 0);
   const totalLimit = budgetData.reduce((acc, curr) => acc + curr.limit, 0);
-  const percentUsed = (totalSpent / totalLimit) * 100;
+  const percentUsed = totalLimit > 0 ? (totalSpent / totalLimit) * 100 : 0;
 
   // AI Insight Logic
   const overBudgetCategories = budgetData.filter(c => c.spent > c.limit);
   const insight = overBudgetCategories.length > 0 
     ? `Heads up! You've exceeded your expected budget for ${overBudgetCategories[0].category}.` 
     : "Great job! You're within your expected spending limits.";
+  
+  const date = new Date();
+  const monthLabel = MONTH_NAMES[date.getMonth()];
+  const yearLabel = date.getFullYear();
 
   return (
     <div className="bg-zinc-900 border border-white/5 rounded-3xl p-6 shadow-xl animate-slide-up mb-6 relative overflow-hidden">
@@ -32,7 +38,7 @@ export const PersonalBudgetCard: React.FC<PersonalBudgetCardProps> = ({ budgetDa
         </div>
         <div className="flex items-center gap-2">
             <span className="text-xs font-medium px-2 py-1 rounded bg-zinc-800 text-zinc-400">
-                Oct 2023
+                {monthLabel} {yearLabel}
             </span>
             <button onClick={onEdit} className="p-1.5 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors">
                 <Pencil size={14} />
@@ -43,7 +49,7 @@ export const PersonalBudgetCard: React.FC<PersonalBudgetCardProps> = ({ budgetDa
       {/* Categories */}
       <div className="space-y-5 relative z-10">
         {budgetData.map((item) => {
-          const ratio = Math.min((item.spent / item.limit) * 100, 100);
+          const ratio = item.limit > 0 ? Math.min((item.spent / item.limit) * 100, 100) : 0;
           const isOver = item.spent > item.limit;
           
           return (

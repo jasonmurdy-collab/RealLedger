@@ -140,43 +140,70 @@ export default function App() {
   if (ledgerMode === 'passive') { bgGradient = 'bg-cyan-500'; indicatorPos = '33.33%'; shadowColor = 'cyan'; }
   if (ledgerMode === 'personal') { bgGradient = 'bg-violet-500'; indicatorPos = '66.66%'; shadowColor = 'violet'; }
 
-  const bankBalance = transactions.reduce((acc, t) => acc + t.amount, 0) + 10000;
+  const bankBalance = transactions.reduce((acc, t) => acc + t.amount, 0);
   const activeIncome = transactions.filter(t => t.type === 'active' && t.amount > 0).reduce((acc, t) => acc + t.amount, 0);
   const hstLiability = activeIncome * 0.13;
-  const personalCash = transactions.filter(t => t.type === 'personal').reduce((acc, t) => acc + t.amount, 0) + 5000;
+  const personalCash = transactions.filter(t => t.type === 'personal').reduce((acc, t) => acc + t.amount, 0);
   const displayCash = ledgerMode === 'personal' ? personalCash : (bankBalance - hstLiability);
   const currentTransactions = transactions.filter(t => t.type === ledgerMode);
 
   // --- ACTIONS ---
 
-  const handleBankSync = async () => {
+const handleBankSync = async () => {
     if (!session?.user || !selectedBank) return;
     setIsSyncing(true);
 
-    // Simulate API call to connect bank
-    await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+    // In a real production app, this is where you would exchange the Plaid Public Token
+    // For now, we simulate the delay, but we WILL save the "connected" account to the DB.
+    await new Promise(resolve => setTimeout(resolve, 2000)); 
 
-    setIsSyncing(false);
-    setBankStep('success');
-
-    // Simulate adding a new bank account
     const newAccount: BankAccount = {
-      id: `mock-bank-${Date.now()}`,
+      id: `bank-${Date.now()}`, // In real app, this comes from Plaid
       name: `${selectedBank} Checking`,
       type: 'Checking',
-      mask: '1234', // Mock last 4 digits
+      mask: Math.floor(1000 + Math.random() * 9000).toString(), // Random 4 digits
       institution: selectedBank,
       defaultContext: selectedUsage,
       user_id: session.user.id,
     };
-    setAccounts(prev => [...prev, newAccount]);
 
-    // After success, close modal and reset state
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Show success for 1.5 seconds
-    setIsBankModalOpen(false);
-    setBankStep('list');
-    setSelectedBank('');
-    setSelectedUsage('active');
+    // SAVE TO DB
+    const { error } = await supabase.from('accounts').insert([newAccount]);
+    
+    if (error) {
+        console.error("Failed to link bank:", error);
+        setIsSyncing(false);
+        return;
+    }
+
+    setAccounts(prev => [...prev, newAccount]);
+    setIsSyncing(false);
+    setBankStep('success');
+
+    setTimeout(() => {
+        setIsBankModalOpen(false);
+        setBankStep('list');
+        setSelectedBank('');
+        setSelectedUsage('active');
+    }, 1500);
+  };
+
+  const handleDeleteAccount = async (accountId: string) => {
+    if (!window.confirm("Are you sure you want to remove this account? This cannot be undone.")) {
+        return;
+    }
+
+    const { error } = await supabase
+        .from('accounts')
+        .delete()
+        .eq('id', accountId);
+
+    if (error) {
+        console.error("Failed to delete account:", error);
+        throw new Error("Could not remove account.");
+    }
+
+    setAccounts(prev => prev.filter(acc => acc.id !== accountId));
   };
 
   const handleAddTransaction = async (txData: Omit<Transaction, 'id' | 'status'> | Omit<Transaction, 'id' | 'status'>[]) => {
@@ -252,7 +279,8 @@ export default function App() {
       
       if (error) {
         console.error("Supabase profile update error:", error);
-        throw new Error(error.message); // Throw the specific Supabase error message
+        // Throw a more descriptive error to be caught by the UI component.
+        throw new Error(`Profile update failed: ${error.message}`);
       }
 
       if (data) setUserProfile(data);
@@ -305,12 +333,12 @@ export default function App() {
                     </div>
                   </div>
                 </section>
-                <MetricsCard mode={ledgerMode} transactions={transactions} />
+                <MetricsCard mode={ledgerMode} transactions={transactions} properties={properties} />
                 {ledgerMode === 'personal' && <PersonalBudgetCard budgetData={budgetData} onEdit={() => setIsBudgetModalOpen(true)} />}
                 {ledgerMode === 'passive' && (
                     <div className="animate-slide-up">
                         <div className="flex justify-between items-center mb-3"><h3 className="text-lg font-bold text-white flex items-center gap-2"><Building2 size={18} className="text-cyan-500" /> Portfolio</h3><button onClick={() => setIsPropertyModalOpen(true)} className="p-1.5 rounded-full bg-cyan-500/10 text-cyan-500 hover:bg-cyan-500/20 transition-colors"><Plus size={16} /></button></div>
-                        {properties.length > 0 ? properties.map(p => <PropertyCard key={p.id} property={p} />) : (<div className="p-6 border border-white/5 rounded-2xl bg-zinc-900/50 text-center"><p className="text-zinc-500 text-sm">No properties yet.</p><button onClick={() => setIsPropertyModalOpen(true)} className="text-cyan-500 text-xs font-bold mt-2 hover:underline">Add Property</button></div>)}
+                        {properties.length > 0 ? properties.map(p => <PropertyCard key={p.id} property={p} transactions={transactions} />) : (<div className="p-6 border border-white/5 rounded-2xl bg-zinc-900/50 text-center"><p className="text-zinc-500 text-sm">No properties yet.</p><button onClick={() => setIsPropertyModalOpen(true)} className="text-cyan-500 text-xs font-bold mt-2 hover:underline">Add Property</button></div>)}
                     </div>
                 )}
                 <section className="animate-slide-up" style={{ animationDelay: '100ms' }}>
@@ -323,7 +351,7 @@ export default function App() {
           );
           case 'analytics': return <AnalyticsView mode={ledgerMode} transactions={transactions} />;
           case 'mileage': return <MileageView logs={mileageLogs} onAddTrip={() => setIsMileageModalOpen(true)} />;
-          case 'profile': return <ProfileView accounts={accounts} profile={userProfile} onLogout={() => supabase.auth.signOut()} onConnectBank={() => setIsBankModalOpen(true)} onUpdateProfile={handleUpdateProfile} onUploadAvatar={handleProfilePictureUpload} />;
+          case 'profile': return <ProfileView accounts={accounts} profile={userProfile} onLogout={() => supabase.auth.signOut()} onConnectBank={() => setIsBankModalOpen(true)} onUpdateProfile={handleUpdateProfile} onUploadAvatar={handleProfilePictureUpload} onDeleteAccount={handleDeleteAccount} />;
           default: return null;
       }
   }

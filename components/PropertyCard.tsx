@@ -1,14 +1,20 @@
 import React from 'react';
-import { Property } from '../types';
+import { Property, Transaction } from '../types';
 import { Home, TrendingUp, Users } from 'lucide-react';
 
 interface PropertyCardProps {
   property: Property;
+  transactions: Transaction[];
 }
 
-export const PropertyCard: React.FC<PropertyCardProps> = ({ property }) => {
-  const equity = property.currentValue - 450000; // Mock mortgage deduction
-  const capRate = 4.2; // Mock calc
+export const PropertyCard: React.FC<PropertyCardProps> = ({ property, transactions }) => {
+  const mortgage = property.mortgageBalance || 0;
+  const equity = property.currentValue - mortgage; 
+  
+  // Real Cap Rate Calc: (NOI / Current Value) * 100
+  const propertyTransactions = transactions.filter(t => t.propertyId === property.id);
+  const noi = propertyTransactions.reduce((acc, t) => acc + t.amount, 0); // Sum of income and expenses
+  const capRate = property.currentValue > 0 ? (noi / property.currentValue) * 100 : 0;
 
   return (
     <div className="bg-zinc-900 border border-white/5 rounded-2xl p-4 mb-4 relative overflow-hidden group hover:border-cyan-500/30 transition-colors">
@@ -41,7 +47,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({ property }) => {
       <div className="flex items-center gap-4 mt-2">
          <div className="flex items-center gap-1.5 text-xs text-zinc-400">
             <TrendingUp size={12} />
-            <span>Cap Rate: {capRate}%</span>
+            <span>Cap Rate: {capRate.toFixed(1)}%</span>
          </div>
          <div className="flex items-center gap-1.5 text-xs text-zinc-400">
             <Users size={12} />

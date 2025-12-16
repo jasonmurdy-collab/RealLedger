@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BudgetCategory } from '../types';
-import { X, Plus, Save, Trash2 } from 'lucide-react';
+import { X, Plus, Save, Trash2, Sparkles } from 'lucide-react';
+import { GoogleGenAI, Type } from "@google/genai";
 
 interface BudgetEditorProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
   const [localBudget, setLocalBudget] = useState<BudgetCategory[]>(JSON.parse(JSON.stringify(budgetData)));
   const [newCategoryName, setNewCategoryName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isSuggesting, setIsSuggesting] = useState(false);
   
   if (!isOpen) return null;
 
@@ -33,6 +35,45 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
     const updated = [...localBudget];
     updated.splice(index, 1);
     setLocalBudget(updated);
+  };
+
+  const handleAiSuggestions = async () => {
+    setIsSuggesting(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: 'Based on a typical Canadian professional, suggest 5 common personal budget categories. Examples: Groceries, Dining Out, Shopping. Respond with a JSON object with a "categories" key containing an array of strings.',
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              categories: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            },
+            required: ["categories"]
+          }
+        }
+      });
+      const result = JSON.parse(response.text.trim());
+      const suggestions: string[] = result.categories;
+
+      if (suggestions && suggestions.length > 0) {
+        const newCategories = suggestions
+          .filter(s => !localBudget.some(b => b.category.toLowerCase() === s.toLowerCase()))
+          .map(s => ({ category: s, spent: 0, limit: 0 }));
+        
+        setLocalBudget(prev => [...prev, ...newCategories]);
+      }
+    } catch (error) {
+      console.error("AI suggestion failed:", error);
+      // You could set an error state to show in the UI
+    } finally {
+      setIsSuggesting(false);
+    }
   };
 
   const saveAndClose = async () => {
@@ -87,6 +128,20 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
         </div>
 
         <div className="mt-4 pt-4 border-t border-white/5">
+            <button 
+                onClick={handleAiSuggestions}
+                disabled={isSuggesting}
+                className="w-full mb-4 py-2 px-4 rounded-xl border border-violet-500/50 bg-violet-500/10 text-violet-300 font-semibold flex items-center justify-center gap-2 hover:bg-violet-500/20 transition-colors disabled:opacity-50"
+            >
+                {isSuggesting ? (
+                    <div className="w-4 h-4 border-2 border-violet-300/50 border-t-violet-300 rounded-full animate-spin"></div>
+                ) : (
+                    <>
+                        <Sparkles size={16} />
+                        Suggest Categories with AI
+                    </>
+                )}
+            </button>
             <div className="flex gap-2 mb-6">
                 <input 
                     type="text" 

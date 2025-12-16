@@ -1,14 +1,15 @@
 import React, { useMemo } from 'react';
 import { AreaChart, Area, ResponsiveContainer } from 'recharts';
-import { LedgerType, Transaction } from '../types';
+import { LedgerType, Transaction, Property } from '../types';
 import { MONTH_NAMES } from '../constants';
 
 interface MetricsCardProps {
   mode: LedgerType;
   transactions: Transaction[];
+  properties: Property[];
 }
 
-export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions }) => {
+export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, properties }) => {
   // Filter transactions for the current mode
   const modeTransactions = useMemo(() => 
     transactions.filter(t => t.type === mode), 
@@ -65,25 +66,34 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions }) 
     color = '#06b6d4'; // cyan-500
     // Net Operating Income (Sum of all transactions)
     const noi = modeTransactions.reduce((acc, t) => acc + t.amount, 0);
-    // Mock CCA for now as we don't have full asset depreciation engine yet
-    const cca = 12100; 
+    // Estimated CCA claim based on 4% rate for Class 1 assets
+    const cca = properties.reduce((sum, p) => sum + (p.uccBalance * 0.04), 0);
 
     label1 = 'YTD Net Op Income'; 
     val1 = `$${(noi / 1000).toFixed(1)}k`;
-    label2 = 'Portfolio CCA'; 
+    label2 = 'Est. Annual CCA'; 
     val2 = `$${(cca / 1000).toFixed(1)}k`;
-    sub2 = 'Class 1 Remaining';
+    sub2 = 'Based on UCC';
 
   } else {
     color = '#8b5cf6'; // violet-500
-    // Monthly Spend (Current Month)
     const currentMonth = new Date().getMonth();
-    const monthlySpend = modeTransactions
-      .filter(t => new Date(t.date).getMonth() === currentMonth && t.amount < 0)
+    const currentYear = new Date().getFullYear();
+
+    const currentMonthTx = modeTransactions.filter(t => {
+      const d = new Date(t.date);
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    });
+
+    const monthlySpend = currentMonthTx
+      .filter(t => t.amount < 0)
       .reduce((acc, t) => acc + Math.abs(t.amount), 0);
+
+    const monthlyIncome = currentMonthTx
+      .filter(t => t.amount > 0)
+      .reduce((acc, t) => acc + t.amount, 0);
     
-    // Mock Savings Rate
-    const savingsRate = 18;
+    const savingsRate = monthlyIncome > 0 ? Math.round(((monthlyIncome - monthlySpend) / monthlyIncome) * 100) : 0;
 
     label1 = 'Monthly Spend'; 
     val1 = `$${monthlySpend.toLocaleString()}`;
