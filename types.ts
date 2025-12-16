@@ -23,7 +23,8 @@ export interface Property {
   purchasePrice: number;
   currentValue: number;
   ccaClass: number; // Class 1 usually 4%
-  uccBalance: number; // Undepreciated Capital Cost
+  openingUcc: number; // UCC at start of year
+  additions: number; // Capital additions this year
   tenantName: string;
   leaseEnd: string;
   user_id?: string;
@@ -49,6 +50,16 @@ export interface Transaction {
   user_id?: string; // Added for Supabase RLS
 }
 
+export interface DraftTransaction {
+  id: string;
+  date: string;
+  vendor: string;
+  amount: number;
+  description: string;
+  category_guess: string;
+  selected: boolean;
+}
+
 export interface MileageLog {
     id?: string;
     date: string;
@@ -61,7 +72,7 @@ export interface MileageLog {
 
 export interface Notification {
     id: string;
-    type: 'pending_tx' | 'budget_over' | 'lease_expiry';
+    type: 'pending_tx' | 'budget_over' | 'lease_expiry' | 'hst_remittance';
     message: string;
     date: Date;
     relatedId?: string; // e.g., transaction ID or budget category name
@@ -71,12 +82,14 @@ export interface ChartDataPoint {
   month: string;
   value: number;
   expense?: number; // Added for Profit/Loss charts
+  forecast?: boolean;
 }
 
 export interface BudgetCategory {
   category: string;
   spent: number;
   limit: number;
+  savingsGoal?: number; // For Goal-Oriented Budgeting
   user_id?: string; // Added for Supabase RLS
 }
 

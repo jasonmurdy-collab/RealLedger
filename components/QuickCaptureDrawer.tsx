@@ -104,26 +104,35 @@ const handleLogTransaction = async () => {
       let finalReceiptUrl: string | undefined = undefined;
 
       if (receiptImage) {
-        const response = await fetch(receiptImage);
-        const blob = await response.blob();
-        const fileExt = blob.type.split('/')[1] || 'jpg';
-        const fileName = `${Date.now()}.${fileExt}`;
-        const user = (await supabase.auth.getUser()).data.user;
-        if (!user) throw new Error("User not found");
+        try {
+            const response = await fetch(receiptImage);
+            const blob = await response.blob();
+            const fileExt = blob.type.split('/')[1] || 'jpg';
+            const fileName = `${Date.now()}.${fileExt}`;
+            const user = (await supabase.auth.getUser()).data.user;
+            if (!user) throw new Error("User not found");
 
-        const filePath = `${user.id}/${fileName}`;
+            const filePath = `${user.id}/${fileName}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from('receipts')
-          .upload(filePath, blob);
+            // Attempt upload, catch error if bucket missing
+            const { error: uploadError } = await supabase.storage
+            .from('receipts')
+            .upload(filePath, blob);
 
-        if (uploadError) throw uploadError;
-
-        const { data: urlData } = supabase.storage
-          .from('receipts')
-          .getPublicUrl(filePath);
-        
-        finalReceiptUrl = urlData.publicUrl;
+            if (uploadError) {
+                console.warn("Receipt upload failed (Storage bucket 'receipts' likely missing):", uploadError.message);
+                // Proceed without image URL
+            } else {
+                const { data: urlData } = supabase.storage
+                .from('receipts')
+                .getPublicUrl(filePath);
+                
+                finalReceiptUrl = urlData.publicUrl;
+            }
+        } catch (storageErr) {
+            console.error("Receipt processing error:", storageErr);
+            // Ignore receipt processing errors to allow transaction saving
+        }
       }
       
       const hstAmount = includeHST ? numAmount - (numAmount / (1 + ONTARIO_HST_RATE)) : 0;

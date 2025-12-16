@@ -1,6 +1,6 @@
 import React from 'react';
 import { Notification } from '../types';
-import { X, Bell, AlertTriangle, FileWarning } from 'lucide-react';
+import { X, Bell, AlertTriangle, FileWarning, DollarSign } from 'lucide-react';
 
 interface NotificationModalProps {
   isOpen: boolean;
@@ -11,7 +11,8 @@ interface NotificationModalProps {
 const IconMap: { [key in Notification['type']]: React.ReactNode } = {
     pending_tx: <FileWarning size={18} className="text-amber-400" />,
     budget_over: <AlertTriangle size={18} className="text-rose-400" />,
-    lease_expiry: <FileWarning size={18} className="text-cyan-400" />
+    lease_expiry: <FileWarning size={18} className="text-cyan-400" />,
+    hst_remittance: <DollarSign size={18} className="text-emerald-400" />
 };
 
 export const NotificationModal: React.FC<NotificationModalProps> = ({ isOpen, onClose, notifications }) => {
