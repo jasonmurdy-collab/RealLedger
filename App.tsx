@@ -94,7 +94,16 @@ export default function App() {
     if (!session?.user) return;
     const { data, error } = await supabase.from('budget_categories').select('*');
     if (error) console.error("Error fetching budget categories:", error);
-    if (data) setBudgetData(data);
+    if (data) {
+        // Map snake_case to camelCase
+        setBudgetData(data.map((b: any) => ({
+            category: b.category,
+            spent: b.spent,
+            limit: b.limit,
+            savingsGoal: b.savings_goal,
+            user_id: b.user_id
+        })));
+    }
   };
 
   useEffect(() => {
@@ -161,9 +170,46 @@ export default function App() {
     // Fetch budgets separately to ensure consistency after saving
     await fetchBudgets();
 
-    if (txRes.data) setTransactions(txRes.data);
+    if (txRes.data) {
+        // Map DB snake_case to App camelCase
+        const mappedTxs: Transaction[] = txRes.data.map((d: any) => ({
+            id: d.id,
+            date: d.date,
+            vendor: d.vendor,
+            amount: d.amount,
+            type: d.type,
+            category: d.category,
+            taxForm: d.tax_form,
+            status: d.status,
+            // is_split likely missing from schema, default to false
+            isSplit: d.is_split || false,
+            // Removed hst_included and hst_amount from map since they aren't in DB yet
+            hstIncluded: false, 
+            hstAmount: 0,
+            // property_id likely missing from schema, default undefined
+            propertyId: d.property_id,
+            receiptUrl: d.receipt_url,
+            user_id: d.user_id
+        }));
+        setTransactions(mappedTxs);
+    }
     if (accRes.data) setAccounts(accRes.data);
-    if (propRes.data) setProperties(propRes.data);
+    if (propRes.data) {
+        const mappedProps: Property[] = propRes.data.map((p: any) => ({
+            id: p.id,
+            address: p.address,
+            purchasePrice: p.purchase_price,
+            currentValue: p.current_value,
+            ccaClass: p.cca_class,
+            openingUcc: p.opening_ucc,
+            additions: p.additions,
+            tenantName: p.tenant_name,
+            leaseEnd: p.lease_end,
+            user_id: p.user_id,
+            mortgageBalance: p.mortgage_balance
+        }));
+        setProperties(mappedProps);
+    }
     if (mileRes.data) setMileageLogs(mileRes.data);
     if (profRes.data) setUserProfile(profRes.data);
     else setUserProfile({ id: user.id, full_name: '', role: 'Real Estate Professional', avatar_url: '' });
@@ -233,13 +279,58 @@ const handleBankSync = async () => {
   const handleAddTransaction = async (txData: Omit<Transaction, 'id' | 'status'> | Omit<Transaction, 'id' | 'status'>[]) => {
     if (!session?.user) throw new Error("User not authenticated.");
     const txs = Array.isArray(txData) ? txData : [txData];
-    const payload = txs.map(t => ({ ...t, user_id: session.user.id }));
+    
+    // Map camelCase to snake_case for DB
+    // Removing fields that are not in the DB schema to prevent errors
+    const payload = txs.map(t => ({ 
+        date: t.date,
+        vendor: t.vendor,
+        amount: t.amount,
+        type: t.type,
+        category: t.category,
+        tax_form: t.taxForm,
+        // The following fields are handled in the client state but not sent to DB
+        // is_split: t.isSplit,
+        // hst_included: t.hstIncluded,
+        // hst_amount: t.hstAmount,
+        // property_id: t.propertyId,
+        // receipt_url: t.receiptUrl,
+        user_id: session.user.id
+    }));
+
     const { data, error } = await supabase.from('transactions').insert(payload).select();
     if (error) {
-      console.error("Supabase Error: Failed to add transaction:", error);
-      throw new Error("Failed to add transaction.");
+      console.error("Supabase Error adding transaction:", JSON.stringify(error, null, 2));
+      throw new Error(`Failed to add transaction: ${error.message}`);
     }
-    if (data) setTransactions(prev => [...data, ...prev]);
+    
+    if (data) {
+        // Map back to camelCase for State
+        // Since DB doesn't store optional fields, we merge the returned ID with our original input for the UI state
+        const mappedData: Transaction[] = data.map((d: any, index: number) => {
+             // Try to match with input array by index (assuming order preserved) 
+             // or fallback to find.
+             const original = txs[index] || txs.find(t => t.vendor === d.vendor && t.amount === d.amount);
+             
+             return {
+                id: d.id,
+                date: d.date,
+                vendor: d.vendor,
+                amount: d.amount,
+                type: d.type,
+                category: d.category,
+                taxForm: d.tax_form,
+                status: d.status,
+                isSplit: original?.isSplit || false,
+                hstIncluded: original?.hstIncluded || false,
+                hstAmount: original?.hstAmount || 0,
+                propertyId: original?.propertyId || d.property_id,
+                receiptUrl: original?.receiptUrl || d.receipt_url,
+                user_id: d.user_id
+             };
+        });
+        setTransactions(prev => [...mappedData, ...prev]);
+    }
   };
   
   const handleAddMileageLog = async (log: Omit<MileageLog, 'id'>) => {
@@ -263,7 +354,7 @@ const handleBankSync = async () => {
           category: b.category,
           spent: b.spent, 
           limit: b.limit,
-          savingsGoal: b.savingsGoal
+          savings_goal: b.savingsGoal // Map to snake_case
       }));
 
       if (payload.length > 0) {
@@ -275,12 +366,41 @@ const handleBankSync = async () => {
 
   const handleAddProperty = async (newProp: Omit<Property, 'id'>) => {
       if (!session?.user) throw new Error("User not authenticated.");
-      const { data, error } = await supabase.from('properties').insert([{ ...newProp, user_id: session.user.id }]).select();
+      
+      const payload = {
+          address: newProp.address,
+          purchase_price: newProp.purchasePrice,
+          current_value: newProp.currentValue,
+          cca_class: newProp.ccaClass,
+          opening_ucc: newProp.openingUcc,
+          additions: newProp.additions,
+          tenant_name: newProp.tenantName,
+          lease_end: newProp.leaseEnd,
+          mortgage_balance: newProp.mortgageBalance,
+          user_id: session.user.id
+      };
+
+      const { data, error } = await supabase.from('properties').insert([payload]).select();
       if (error) {
         console.error("Supabase Error: Failed to add property:", error);
         throw new Error("Failed to add property.");
       }
-      if (data) setProperties(prev => [...prev, data[0]]);
+      if (data) {
+          const mapped: Property = {
+              id: data[0].id,
+              address: data[0].address,
+              purchasePrice: data[0].purchase_price,
+              currentValue: data[0].current_value,
+              ccaClass: data[0].cca_class,
+              openingUcc: data[0].opening_ucc,
+              additions: data[0].additions,
+              tenantName: data[0].tenant_name,
+              leaseEnd: data[0].lease_end,
+              mortgageBalance: data[0].mortgage_balance,
+              user_id: data[0].user_id
+          };
+          setProperties(prev => [...prev, mapped]);
+      }
   };
 
   const handleUpdateProfile = async (profile: UserProfile) => {
