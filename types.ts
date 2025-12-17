@@ -15,6 +15,12 @@ export interface UserProfile {
   sin_last_4?: string;
   is_pro_member?: boolean;
   avatar_url?: string;
+  // New Commission Fields
+  commission_split?: number; // e.g., 80 for 80%
+  annual_cap?: number; // in dollars
+  royalty_fee?: number; // as a percentage
+  transaction_fee?: number; // in dollars
+  cap_anniversary_date?: string; // YYYY-MM-DD
 }
 
 export interface Property {
@@ -46,8 +52,9 @@ export interface Transaction {
   hstAmount?: number;
   propertyId?: string; // Link passive expense to property
   receiptUrl?: string;
-  isRecurring?: boolean;
+  isRecurring?: boolean; // Added for recurring transaction detection
   user_id?: string; // Added for Supabase RLS
+  is_commission?: boolean; // New flag for commission income
 }
 
 export interface DraftTransaction {
@@ -101,4 +108,15 @@ export interface BankAccount {
   institution: string;
   defaultContext?: LedgerType;
   user_id?: string; // Added for Supabase RLS
+}
+
+// New Invoice Type
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  client_name: string;
+  amount: number;
+  due_date: string;
+  status: 'draft' | 'sent' | 'paid';
+  user_id?: string;
 }

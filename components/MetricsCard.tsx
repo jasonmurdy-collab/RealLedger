@@ -67,7 +67,8 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, pr
     // Net Operating Income (Sum of all transactions)
     const noi = modeTransactions.reduce((acc, t) => acc + t.amount, 0);
     // Estimated CCA claim based on 4% rate for Class 1 assets
-    const cca = properties.reduce((sum, p) => sum + (p.uccBalance * 0.04), 0);
+    // FIX: Property 'uccBalance' does not exist on type 'Property'. Changed to 'openingUcc'.
+    const cca = properties.reduce((sum, p) => sum + (p.openingUcc * 0.04), 0);
 
     label1 = 'YTD Net Op Income'; 
     val1 = `$${(noi / 1000).toFixed(1)}k`;

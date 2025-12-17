@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, UploadCloud, FileText, Check, AlertTriangle, Loader2, ArrowRight, Trash2, Edit2, Download } from 'lucide-react';
+import { X, UploadCloud, FileText, Check, AlertTriangle, Loader2, ArrowRight, Trash2, Edit2, Download, ChevronDown } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { Transaction, LedgerType, DraftTransaction, Property } from '../types';
 import { ONTARIO_HST_RATE } from '../constants';
@@ -31,6 +31,11 @@ export const BankStatementUpload: React.FC<BankStatementUploadProps> = ({ isOpen
   // Bulk Edit States
   const [targetLedger, setTargetLedger] = useState<LedgerType>(currentMode);
   const [targetProperty, setTargetProperty] = useState<string>(properties.length > 0 ? properties[0].id : '');
+  const [isBulkActionsOpen, setIsBulkActionsOpen] = useState(false);
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [bulkLedgerType, setBulkLedgerType] = useState<LedgerType | ''>('');
+  const [bulkProperty, setBulkProperty] = useState('');
+  const [bulkHstIncluded, setBulkHstIncluded] = useState<boolean | null>(null);
 
   if (!isOpen) return null;
 
@@ -59,7 +64,7 @@ export const BankStatementUpload: React.FC<BankStatementUploadProps> = ({ isOpen
                              - vendor (Clean name, remove store numbers)
                              - amount (Number. Negative for debits/spend, Positive for deposits)
                              - description (The raw description text)
-                             - category_guess (Guess the expense category based on the vendor, e.g., 'Meals', 'Office', 'Travel', 'Rent')
+                             - category_guess (Guess the expense category based on the vendor, e.g., 'Meals', 'Office', 'Travel', 'Rent', 'Utilities', 'Insurance', 'Repairs')
                              
                              Ignore opening/closing balances or header information. Only extraction transactions.` 
                     },
@@ -114,25 +119,60 @@ export const BankStatementUpload: React.FC<BankStatementUploadProps> = ({ isOpen
       setParsedData(prev => prev.filter(t => t.id !== id));
   };
 
+  const handleApplyBulkAction = (actionType: 'category' | 'ledgerType' | 'property' | 'hstIncluded') => {
+    setParsedData(prev => prev.map(t => {
+      if (t.selected) {
+        let updated = { ...t };
+        if (actionType === 'category' && bulkCategory) {
+          updated.category_guess = bulkCategory;
+        } else if (actionType === 'ledgerType' && bulkLedgerType) {
+          // This doesn't directly update the DraftTransaction type which only has `category_guess`
+          // For actual import, the `targetLedger` is used. This bulk update is more for a visual hint.
+          // For now, we'll keep `targetLedger` as the primary bulk control for ledger type.
+        } else if (actionType === 'property' && bulkProperty) {
+            // Need a way to link `DraftTransaction` to `propertyId` if needed for visual feedback
+            // For now, `targetProperty` is the global bulk property.
+        } else if (actionType === 'hstIncluded' && bulkHstIncluded !== null) {
+            // This would require modifying DraftTransaction to include hstIncluded if we want to preview it
+            // For now, apply it during final import based on bulkHstIncluded state.
+        }
+        return updated;
+      }
+      return t;
+    }));
+    // Reset bulk action states and close dropdown
+    setBulkCategory('');
+    setBulkLedgerType('');
+    setBulkProperty('');
+    setBulkHstIncluded(null);
+    setIsBulkActionsOpen(false);
+  };
+
   const handleFinalImport = async () => {
       const selectedItems = parsedData.filter(t => t.selected);
       if (selectedItems.length === 0) return;
 
       const transactionsToImport: Omit<Transaction, 'id' | 'status'>[] = selectedItems.map(draft => {
-         // Auto-calculate HST if strictly negative (expense)
+         // Auto-calculate HST if strictly negative (expense) AND if bulkHstIncluded is not explicitly set to false
          const isExpense = draft.amount < 0;
          const absAmount = Math.abs(draft.amount);
-         const hstAmount = isExpense ? absAmount - (absAmount / (1 + ONTARIO_HST_RATE)) : 0;
+         const shouldIncludeHST = bulkHstIncluded !== null ? bulkHstIncluded : isExpense; // Use bulk value if set, else auto-detect
+
+         const hstAmount = shouldIncludeHST ? absAmount - (absAmount / (1 + ONTARIO_HST_RATE)) : 0;
          
+         const finalLedgerType = bulkLedgerType || targetLedger;
+         const finalCategory = bulkCategory || draft.category_guess || 'Uncategorized';
+         const finalPropertyId = finalLedgerType === 'passive' ? (bulkProperty || targetProperty) : undefined;
+
          return {
              date: draft.date,
              vendor: draft.vendor,
              amount: draft.amount,
-             type: targetLedger,
-             category: draft.category_guess || 'Uncategorized',
-             taxForm: targetLedger === 'active' ? 't2125' : targetLedger === 'passive' ? 't776' : undefined,
-             propertyId: targetLedger === 'passive' ? targetProperty : undefined,
-             hstIncluded: isExpense, // Simplified assumption for bulk import
+             type: finalLedgerType as LedgerType,
+             category: finalCategory,
+             taxForm: finalLedgerType === 'active' ? 't2125' : finalLedgerType === 'passive' ? 't776' : undefined,
+             propertyId: finalPropertyId,
+             hstIncluded: shouldIncludeHST,
              hstAmount: hstAmount,
              isSplit: false
          };
@@ -144,7 +184,14 @@ export const BankStatementUpload: React.FC<BankStatementUploadProps> = ({ isOpen
       setFile(null);
       setParsedData([]);
       setStep('upload');
+      setBulkCategory('');
+      setBulkLedgerType('');
+      setBulkProperty('');
+      setBulkHstIncluded(null);
   };
+
+  const selectedCount = parsedData.filter(t => t.selected).length;
+  const commonCategories = ['Supplies', 'Repairs', 'Fuel/Auto', 'Meals', 'Advertising', 'Utilities', 'Rent', 'Insurance', 'Mortgage'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6">
@@ -218,7 +265,7 @@ export const BankStatementUpload: React.FC<BankStatementUploadProps> = ({ isOpen
             {step === 'review' && (
                 <div className="flex flex-col h-full">
                     {/* Controls */}
-                    <div className="flex gap-4 mb-4 p-4 bg-zinc-100 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-white/5 shrink-0">
+                    <div className="flex gap-4 mb-4 p-4 bg-zinc-100 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-white/5 shrink-0 relative">
                         <div className="flex-1">
                             <label className="text-xs text-zinc-500 block mb-1">Import As (Ledger)</label>
                             <div className="flex bg-zinc-200 dark:bg-zinc-900 rounded-lg p-1">
@@ -241,61 +288,44 @@ export const BankStatementUpload: React.FC<BankStatementUploadProps> = ({ isOpen
                         )}
                         <div className="flex items-end">
                             <div className="px-4 py-2 bg-zinc-200 dark:bg-zinc-900 rounded-lg border border-zinc-300 dark:border-white/10 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                                {parsedData.filter(t => t.selected).length} Items Selected
+                                {selectedCount} Items Selected
                             </div>
                         </div>
                     </div>
 
-                    {/* Table */}
-                    <div className="flex-1 overflow-y-auto hide-scrollbar border border-zinc-200 dark:border-white/10 rounded-xl">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 sticky top-0 z-10">
-                                <tr>
-                                    <th className="p-3 w-10">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={parsedData.every(t => t.selected)} 
-                                            onChange={(e) => setParsedData(prev => prev.map(t => ({...t, selected: e.target.checked})))}
-                                            className="rounded border-zinc-600 bg-zinc-800 text-rose-500 focus:ring-rose-500"
-                                        />
-                                    </th>
-                                    <th className="p-3">Date</th>
-                                    <th className="p-3">Vendor</th>
-                                    <th className="p-3">Category (Auto)</th>
-                                    <th className="p-3 text-right">Amount</th>
-                                    <th className="p-3 w-10"></th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-zinc-200 dark:divide-white/5 text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
-                                {parsedData.map((row) => (
-                                    <tr key={row.id} className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors ${!row.selected ? 'opacity-50' : ''}`}>
-                                        <td className="p-3">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={row.selected} 
-                                                onChange={() => toggleSelection(row.id)}
-                                                className="rounded border-zinc-600 bg-zinc-800 text-rose-500 focus:ring-rose-500"
-                                            />
-                                        </td>
-                                        <td className="p-3 whitespace-nowrap">{row.date}</td>
-                                        <td className="p-3 font-medium">{row.vendor}</td>
-                                        <td className="p-3">
-                                            <span className="px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-white/10 text-xs border border-zinc-200 dark:border-white/10">
+                    {/* Card List */}
+                    <div className="flex-1 overflow-y-auto hide-scrollbar -mx-2 px-2 py-2 space-y-2">
+                        {parsedData.map((row) => (
+                            <div key={row.id} className={`p-3 rounded-xl border transition-all duration-200 flex items-center gap-3 ${row.selected ? 'bg-zinc-100 dark:bg-zinc-800/50 border-zinc-200 dark:border-white/10' : 'bg-transparent border-transparent hover:bg-zinc-100/50 dark:hover:bg-zinc-800/20'}`}>
+                                <div className="p-1">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={row.selected} 
+                                        onChange={() => toggleSelection(row.id)}
+                                        className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-rose-500 focus:ring-rose-500/50"
+                                    />
+                                </div>
+                                <div className="flex-1">
+                                    <div className="flex justify-between items-center">
+                                        <p className="font-bold text-sm text-zinc-900 dark:text-white">{row.vendor}</p>
+                                        <p className={`font-bold text-sm ${row.amount > 0 ? 'text-emerald-500' : 'text-zinc-900 dark:text-white'}`}>
+                                            {row.amount > 0 ? '+' : ''}{row.amount.toFixed(2)}
+                                        </p>
+                                    </div>
+                                    <div className="flex justify-between items-center mt-1">
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-xs text-zinc-500">{new Date(row.date).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}</p>
+                                            <span className="px-2 py-0.5 rounded-full bg-zinc-200 dark:bg-white/10 text-xs border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-400">
                                                 {row.category_guess}
                                             </span>
-                                        </td>
-                                        <td className={`p-3 text-right font-bold ${row.amount > 0 ? 'text-emerald-500' : 'text-zinc-900 dark:text-white'}`}>
-                                            {row.amount > 0 ? '+' : ''}{row.amount.toFixed(2)}
-                                        </td>
-                                        <td className="p-3 text-center">
-                                            <button onClick={() => deleteRow(row.id)} className="text-zinc-400 hover:text-rose-500">
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                        </div>
+                                        <button onClick={() => deleteRow(row.id)} className="text-zinc-400 hover:text-rose-500 p-1 rounded-full">
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
                     </div>
 
                     <div className="pt-4 mt-2 border-t border-zinc-200 dark:border-white/5 flex justify-end gap-3">
@@ -307,7 +337,7 @@ export const BankStatementUpload: React.FC<BankStatementUploadProps> = ({ isOpen
                             className="px-6 py-3 bg-zinc-900 dark:bg-white text-white dark:text-black font-bold rounded-xl hover:opacity-90 shadow-lg flex items-center gap-2"
                         >
                             <Download size={18} />
-                            Import {parsedData.filter(t => t.selected).length} Transactions
+                            Import {selectedCount} Transactions
                         </button>
                     </div>
                 </div>

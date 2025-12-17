@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Settings, CreditCard, Lock, HelpCircle, ChevronRight, LogOut, ShieldCheck, FileText, Plus, Edit2, Save, X, Camera, UploadCloud, Trash2, Sun, Moon, Download } from 'lucide-react';
+import { User, Settings, CreditCard, Lock, HelpCircle, ChevronRight, LogOut, ShieldCheck, FileText, Plus, Edit2, Save, X, Camera, UploadCloud, Trash2, Sun, Moon, Download, Percent, Calendar, DollarSign } from 'lucide-react';
 import { BankAccount, UserProfile, Transaction } from '../types';
 import { ProUpgradeModal } from './ProUpgradeModal';
 
@@ -26,7 +26,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
     cra_business_number: '',
     sin_last_4: '',
     is_pro_member: false,
-    avatar_url: ''
+    avatar_url: '',
+    commission_split: 80,
+    annual_cap: 16000,
+    royalty_fee: 6,
+    transaction_fee: 250,
+    cap_anniversary_date: ''
   });
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -36,7 +41,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
 
   useEffect(() => {
     if (profile) {
-      setFormData(profile);
+      setFormData({
+        ...profile,
+        commission_split: profile.commission_split || 80,
+        annual_cap: profile.annual_cap || 16000,
+        royalty_fee: profile.royalty_fee || 6,
+        transaction_fee: profile.transaction_fee || 250,
+        cap_anniversary_date: profile.cap_anniversary_date || ''
+      });
     }
   }, [profile]);
 
@@ -66,7 +78,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
     }
   };
 
-  const handleChange = (field: keyof Omit<UserProfile, 'is_pro_member' | 'avatar_url'>, value: string) => {
+  const handleChange = (field: keyof UserProfile, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -212,17 +224,96 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
           </div>
       </section>
 
+      <section>
+          <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 ml-2">Commission Structure</h3>
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-2xl p-4">
+             {isEditing ? (
+                 <div className="space-y-4">
+                     <div className="grid grid-cols-2 gap-4">
+                        <div>
+                           <label className="text-xs text-zinc-500 mb-1 block">Split (%)</label>
+                           <input 
+                               type="number" 
+                               value={formData.commission_split || ''} 
+                               onChange={(e) => handleChange('commission_split', parseInt(e.target.value, 10))}
+                               className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
+                           />
+                        </div>
+                        <div>
+                           <label className="text-xs text-zinc-500 mb-1 block">Royalty Fee (%)</label>
+                           <input 
+                               type="number" 
+                               value={formData.royalty_fee || ''} 
+                               onChange={(e) => handleChange('royalty_fee', parseInt(e.target.value, 10))}
+                               className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
+                           />
+                        </div>
+                     </div>
+                     <div className="grid grid-cols-2 gap-4">
+                        <div>
+                           <label className="text-xs text-zinc-500 mb-1 block">Annual Cap ($)</label>
+                           <input 
+                               type="number" 
+                               value={formData.annual_cap || ''} 
+                               onChange={(e) => handleChange('annual_cap', parseInt(e.target.value, 10))}
+                               className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
+                           />
+                        </div>
+                        <div>
+                           <label className="text-xs text-zinc-500 mb-1 block">Transaction Fee ($)</label>
+                           <input 
+                               type="number" 
+                               value={formData.transaction_fee || ''} 
+                               onChange={(e) => handleChange('transaction_fee', parseInt(e.target.value, 10))}
+                               className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
+                           />
+                        </div>
+                     </div>
+                      <div>
+                           <label className="text-xs text-zinc-500 mb-1 block">Cap Anniversary Date</label>
+                           <input 
+                               type="date"
+                               value={formData.cap_anniversary_date || ''}
+                               onChange={(e) => handleChange('cap_anniversary_date', e.target.value)}
+                               className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
+                           />
+                        </div>
+                 </div>
+             ) : (
+                 <div className="grid grid-cols-2 gap-y-4 gap-x-2">
+                    <CommissionStat icon={<Percent size={14} />} label="Your Split" value={`${formData.commission_split || 0}%`} />
+                    <CommissionStat icon={<DollarSign size={14} />} label="Annual Cap" value={`$${(formData.annual_cap || 0).toLocaleString()}`} />
+                    <CommissionStat icon={<Percent size={14} />} label="Royalty Fee" value={`${formData.royalty_fee || 0}%`} />
+                    <CommissionStat icon={<DollarSign size={14} />} label="Transaction Fee" value={`$${formData.transaction_fee || 0}`} />
+                    <CommissionStat icon={<Calendar size={14} />} label="Anniversary" value={formData.cap_anniversary_date ? new Date(formData.cap_anniversary_date).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', timeZone: 'UTC' }) : 'Not Set'} />
+                 </div>
+             )}
+          </div>
+      </section>
+
+
       <button onClick={onLogout} className="w-full py-4 text-rose-500 font-medium bg-zinc-200/50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-white/5 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-2">
         <LogOut size={18} />
         Sign Out
       </button>
 
-      <p className="text-center text-xs text-zinc-600 pb-4">Version 3.0.0 (Phase 1+2)</p>
+      <p className="text-center text-xs text-zinc-600 pb-4">Version 3.1.0</p>
     </div>
     <ProUpgradeModal isOpen={isProModalOpen} onClose={() => setIsProModalOpen(false)} onConfirm={() => {}} />
     </>
   );
 };
+
+const CommissionStat = ({icon, label, value}: {icon: React.ReactNode, label: string, value: string}) => (
+    <div className="flex items-center gap-2">
+        <div className="p-1.5 text-rose-500">{icon}</div>
+        <div>
+            <p className="text-xs text-zinc-500">{label}</p>
+            <p className="text-sm font-bold text-zinc-900 dark:text-white">{value}</p>
+        </div>
+    </div>
+);
+
 
 const SettingItem = ({ icon, label, value, subValue, onClick }: { icon: React.ReactNode, label: string, value?: string, subValue?: string, onClick?: () => void }) => (
   <button onClick={onClick} className="w-full flex items-center justify-between p-4 hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors text-left disabled:opacity-50 disabled:hover:bg-transparent" disabled={!onClick}>

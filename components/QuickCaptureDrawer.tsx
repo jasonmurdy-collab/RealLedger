@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { X, Receipt, Building, Briefcase, Calculator, Camera, Check, UploadCloud, Trash2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, Receipt, Building, Briefcase, Calculator, Camera, Check, UploadCloud, Trash2, Mic, Sparkles, XCircle } from 'lucide-react';
 import { ComplianceAssistant } from './ComplianceAssistant';
-import { Property, Transaction, LedgerType } from '../types';
+import { Property, Transaction, LedgerType, TaxForm } from '../types';
 import { ONTARIO_HST_RATE } from '../constants';
 import { GoogleGenAI, Type } from "@google/genai";
 import { supabase } from '../supabaseClient';
@@ -24,6 +24,14 @@ const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reje
   reader.onerror = error => reject(error);
 });
 
+interface AiSuggestion {
+  ledgerType?: LedgerType;
+  taxForm?: TaxForm;
+  hstIncluded?: boolean;
+  propertyId?: string;
+  category?: string;
+}
+
 export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, onClose, onAddTransaction, properties }) => {
   const [amount, setAmount] = useState<string>('');
   const [vendor, setVendor] = useState('');
@@ -33,9 +41,112 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [receiptImage, setReceiptImage] = useState<string | null>(null);
-  const [selectedProperty, setSelectedProperty] = useState(properties.length > 0 ? properties[0].id : '');
+  const [selectedProperty, setSelectedProperty] = useState('');
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [liveTranscription, setLiveTranscription] = useState('');
+  const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion | null>(null);
+  // FIX: Changed SpeechRecognition type to 'any' to resolve TypeScript error as it's a browser-specific, non-standard API type.
+  const recognitionRef = useRef<any | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      // Reset states when drawer closes
+      setAmount('');
+      setVendor('');
+      setSplitRatio(50);
+      setIncludeHST(true);
+      setCategory('Supplies');
+      setIsScanning(false);
+      setIsSaving(false);
+      setReceiptImage(null);
+      setSelectedProperty(properties.length > 0 ? properties[0].id : '');
+      setAiSuggestions(null);
+      setLiveTranscription('');
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        setIsVoiceRecording(false);
+      }
+    } else {
+        // Set default property if available when opening
+        setSelectedProperty(properties.length > 0 ? properties[0].id : '');
+    }
+  }, [isOpen, properties]);
+
+  // AI Categorization effect
+  useEffect(() => {
+    if (amount && vendor && category && isOpen) {
+        getAiSuggestions();
+    } else {
+        setAiSuggestions(null);
+    }
+  }, [amount, vendor, category, isOpen]);
 
   if (!isOpen) return null;
+
+  const getAiSuggestions = async () => {
+    if (!amount || !vendor || !category) return;
+    
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+        const prompt = `Based on a transaction of $${amount} from ${vendor} categorized as ${category}, suggest the most likely LedgerType (active, passive, personal), TaxForm (t2125, t776, or undefined), if HST is typically Included (boolean), and if it's for a property (provide a propertyId from this list if applicable, otherwise undefined: ${properties.map(p => `{id: "${p.id}", address: "${p.address}"}`).join(', ')}). Respond with a JSON object only.`;
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{ parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        ledgerType: { type: Type.STRING, enum: ['active', 'passive', 'personal'] },
+                        taxForm: { type: Type.STRING, enum: ['t2125', 't776'] },
+                        hstIncluded: { type: Type.BOOLEAN },
+                        propertyId: { type: Type.STRING },
+                        category: { type: Type.STRING } // Allow AI to suggest category too
+                    },
+                },
+            },
+        });
+
+        const jsonString = response.text.trim();
+        const parsedData = JSON.parse(jsonString);
+
+        // Filter out propertyId if it doesn't exist in the provided list
+        if (parsedData.propertyId && !properties.some(p => p.id === parsedData.propertyId)) {
+            parsedData.propertyId = undefined;
+        }
+
+        setAiSuggestions(parsedData);
+
+    } catch (error) {
+        console.error("AI suggestion failed:", error);
+        setAiSuggestions(null);
+    }
+  };
+
+  const applySuggestion = (key: keyof AiSuggestion, value: any) => {
+    switch (key) {
+      case 'ledgerType':
+        if (value === 'active') setSplitRatio(100);
+        else if (value === 'passive') setSplitRatio(0);
+        // Personal ledger isn't handled by split ratio directly here, need to rethink how that applies if it's a direct suggestion
+        break;
+      case 'taxForm': // Tax form is implicitly linked to ledgerType via splitRatio, so maybe not directly applicable
+        break;
+      case 'hstIncluded':
+        setIncludeHST(value);
+        break;
+      case 'propertyId':
+        setSelectedProperty(value);
+        setSplitRatio(0); // If property is suggested, it's likely passive
+        break;
+      case 'category':
+        setCategory(value);
+        break;
+      default:
+        break;
+    }
+  };
 
   const performOcr = async (file: File) => {
     if (!file) return;
@@ -54,7 +165,7 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
         contents: {
           parts: [
             {
-              text: "Analyze this receipt image. Extract the vendor name and the final total amount as a number. Respond with a JSON object only."
+              text: "Analyze this receipt image. Extract the vendor name, the final total amount as a number, and a likely category (e.g., Supplies, Meals, Fuel/Auto). Respond with a JSON object only."
             },
             {
               inlineData: {
@@ -71,6 +182,7 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
             properties: {
               vendor: { type: Type.STRING },
               amount: { type: Type.NUMBER },
+              category: { type: Type.STRING },
             },
             required: ["vendor", "amount"]
           },
@@ -82,13 +194,124 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
 
       if (parsedData.vendor) setVendor(parsedData.vendor);
       if (parsedData.amount) setAmount(parsedData.amount.toString());
+      if (parsedData.category) setCategory(parsedData.category);
       
     } catch (error) {
       console.error("OCR Scan failed:", error);
-      // You could set an error state here to show in the UI
       setReceiptImage(null); // Clear preview on error
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  const startVoiceRecording = () => {
+    if (!('webkitSpeechRecognition' in window)) {
+      alert("Speech recognition is not supported in this browser. Please use Chrome.");
+      return;
+    }
+
+    // FIX: Access SpeechRecognition from window.
+    const SpeechRecognition = (window as any).webkitSpeechRecognition;
+    recognitionRef.current = new SpeechRecognition();
+    recognitionRef.current.continuous = false;
+    recognitionRef.current.interimResults = true;
+    recognitionRef.current.lang = 'en-CA'; // Canadian English
+
+    recognitionRef.current.onstart = () => {
+      setIsVoiceRecording(true);
+      setLiveTranscription('');
+      setAmount('');
+      setVendor('');
+      setCategory('Supplies'); // Reset category for voice input
+      setSelectedProperty(''); // Reset property for voice input
+    };
+
+    // FIX: Changed SpeechRecognitionEvent type to 'any' to resolve TypeScript error.
+    recognitionRef.current.onresult = (event: any) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      setLiveTranscription(finalTranscript || interimTranscript);
+    };
+
+    recognitionRef.current.onend = async () => {
+      setIsVoiceRecording(false);
+      if (liveTranscription) {
+        await processVoiceInput(liveTranscription);
+      }
+      setLiveTranscription('');
+    };
+
+    // FIX: Changed SpeechRecognitionErrorEvent type to 'any' to resolve TypeScript error.
+    recognitionRef.current.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      setIsVoiceRecording(false);
+      alert(`Voice input error: ${event.error}. Please try again.`);
+    };
+
+    recognitionRef.current.start();
+  };
+
+  const stopVoiceRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+  };
+
+  const processVoiceInput = async (text: string) => {
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+      const prompt = `Extract transaction details from this text: "${text}". I need the amount (number), vendor, category, ledger type (active, passive, personal, default to active), whether HST is included (boolean, default to false), and property ID (if mentioned, from this list: ${properties.map(p => `{id: "${p.id}", address: "${p.address}"}`).join(', ')}, otherwise undefined). Respond with a JSON object only.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              amount: { type: Type.NUMBER },
+              vendor: { type: Type.STRING },
+              category: { type: Type.STRING },
+              ledgerType: { type: Type.STRING, enum: ['active', 'passive', 'personal'] },
+              hstIncluded: { type: Type.BOOLEAN },
+              propertyId: { type: Type.STRING },
+            },
+            required: ["amount", "vendor", "category"]
+          },
+        },
+      });
+
+      const jsonString = response.text.trim();
+      const parsedData = JSON.parse(jsonString);
+
+      if (parsedData.amount) setAmount(parsedData.amount.toString());
+      if (parsedData.vendor) setVendor(parsedData.vendor);
+      if (parsedData.category) setCategory(parsedData.category);
+      if (parsedData.hstIncluded !== undefined) setIncludeHST(parsedData.hstIncluded);
+      if (parsedData.ledgerType) {
+        if (parsedData.ledgerType === 'active') setSplitRatio(100);
+        else if (parsedData.ledgerType === 'passive') setSplitRatio(0);
+        else setSplitRatio(50); // Default for personal, or if voice can't determine business/passive
+      }
+      if (parsedData.propertyId && properties.some(p => p.id === parsedData.propertyId)) {
+        setSelectedProperty(parsedData.propertyId);
+        setSplitRatio(0); // If property is mentioned, it's likely passive
+      } else {
+        setSelectedProperty('');
+      }
+
+    } catch (error) {
+      console.error("AI voice processing failed:", error);
+      alert("Failed to process voice input. Please try again or enter manually.");
     }
   };
   
@@ -173,14 +396,14 @@ const handleLogTransaction = async () => {
         }
         await onAddTransaction(transactionsToCreate);
       } else {
-        const ledgerType: LedgerType = splitRatio === 100 ? 'active' : 'passive';
+        const ledgerType: LedgerType = splitRatio === 100 ? 'active' : (splitRatio === 0 ? 'passive' : 'personal'); // Assuming 50% split would be personal if not active/passive
         const newTransaction: Omit<Transaction, 'id' | 'status'> = {
           date,
           vendor,
           amount: -numAmount,
           type: ledgerType,
           category,
-          taxForm: ledgerType === 'active' ? 't2125' : 't776',
+          taxForm: ledgerType === 'active' ? 't2125' : ledgerType === 'passive' ? 't776' : undefined,
           isSplit: false,
           propertyId: ledgerType === 'passive' ? selectedProperty : undefined,
           hstIncluded: includeHST,
@@ -238,9 +461,18 @@ const handleLogTransaction = async () => {
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
                 className="bg-transparent text-5xl font-bold text-white text-center w-48 focus:outline-none placeholder:text-zinc-700"
-                autoFocus={!isScanning}
+                autoFocus={!isScanning && !isVoiceRecording}
                 />
+                <button 
+                  onClick={isVoiceRecording ? stopVoiceRecording : startVoiceRecording} 
+                  className={`p-2 rounded-full transition-colors ${isVoiceRecording ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+                >
+                  <Mic size={24} />
+                </button>
             </div>
+            {isVoiceRecording && liveTranscription && (
+                <p className="text-sm text-zinc-400 mt-2">{liveTranscription}</p>
+            )}
           </div>
         </div>
 
@@ -303,7 +535,7 @@ const handleLogTransaction = async () => {
                 />
             </div>
             <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
-                {['Supplies', 'Repairs', 'Fuel/Auto', 'Meals', 'Advertising'].map(cat => (
+                {['Supplies', 'Repairs', 'Fuel/Auto', 'Meals', 'Advertising', 'Utilities', 'Rent', 'Insurance'].map(cat => (
                     <button 
                         key={cat}
                         onClick={() => setCategory(cat)}
@@ -314,6 +546,61 @@ const handleLogTransaction = async () => {
                 ))}
             </div>
           </div>
+
+          {aiSuggestions && (
+            <div className="bg-zinc-900/40 rounded-2xl p-5 border border-white/5 relative z-10 animate-slide-up">
+                <h4 className="text-xs font-bold text-violet-300 mb-3 flex items-center gap-2"><Sparkles size={14} /> AI Suggestions</h4>
+                <div className="flex flex-wrap gap-2">
+                    {aiSuggestions.ledgerType && (
+                        <button 
+                            onClick={() => applySuggestion('ledgerType', aiSuggestions.ledgerType)}
+                            className={`px-3 py-1 text-xs font-semibold rounded-full flex items-center gap-1.5 
+                            ${aiSuggestions.ledgerType === 'active' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 
+                               aiSuggestions.ledgerType === 'passive' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' :
+                               'bg-violet-500/20 text-violet-300 border border-violet-500/30'}`}
+                        >
+                            <Sparkles size={12} /> {aiSuggestions.ledgerType.charAt(0).toUpperCase() + aiSuggestions.ledgerType.slice(1)} Ledger
+                        </button>
+                    )}
+                    {aiSuggestions.category && aiSuggestions.category !== category && (
+                        <button 
+                            onClick={() => applySuggestion('category', aiSuggestions.category)}
+                            className="px-3 py-1 text-xs font-semibold rounded-full flex items-center gap-1.5 bg-zinc-700/50 text-zinc-300 border border-zinc-600"
+                        >
+                            <Sparkles size={12} /> Category: {aiSuggestions.category}
+                        </button>
+                    )}
+                    {aiSuggestions.taxForm && (
+                        <button 
+                            onClick={() => applySuggestion('taxForm', aiSuggestions.taxForm)}
+                            className="px-3 py-1 text-xs font-semibold rounded-full flex items-center gap-1.5 bg-zinc-700/50 text-zinc-300 border border-zinc-600"
+                        >
+                            <Sparkles size={12} /> {aiSuggestions.taxForm.toUpperCase()}
+                        </button>
+                    )}
+                    {aiSuggestions.hstIncluded !== undefined && aiSuggestions.hstIncluded !== includeHST && (
+                        <button 
+                            onClick={() => applySuggestion('hstIncluded', aiSuggestions.hstIncluded)}
+                            className="px-3 py-1 text-xs font-semibold rounded-full flex items-center gap-1.5 bg-zinc-700/50 text-zinc-300 border border-zinc-600"
+                        >
+                            <Sparkles size={12} /> HST {aiSuggestions.hstIncluded ? 'Included' : 'Not Included'}
+                        </button>
+                    )}
+                    {aiSuggestions.propertyId && (
+                        <button 
+                            onClick={() => applySuggestion('propertyId', aiSuggestions.propertyId)}
+                            className="px-3 py-1 text-xs font-semibold rounded-full flex items-center gap-1.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
+                        >
+                            <Sparkles size={12} /> Property: {properties.find(p => p.id === aiSuggestions.propertyId)?.address.split(',')[0]}
+                        </button>
+                    )}
+                </div>
+                <button onClick={() => setAiSuggestions(null)} className="absolute top-2 right-2 text-zinc-500 hover:text-white transition-colors">
+                    <XCircle size={16} />
+                </button>
+            </div>
+          )}
+
 
           <div className="bg-zinc-900/40 rounded-2xl p-5 border border-white/5">
             <div className="flex justify-between items-end mb-4">
