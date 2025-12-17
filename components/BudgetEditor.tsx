@@ -24,6 +24,12 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
     setLocalBudget(updated);
   };
 
+  const handleCategoryNameChange = (index: number, val: string) => {
+    const updated = [...localBudget];
+    updated[index].category = val;
+    setLocalBudget(updated);
+  };
+
   const handleAddCategory = () => {
     if (newCategoryName.trim()) {
       setLocalBudget([...localBudget, { category: newCategoryName, spent: 0, limit: 100 }]);
@@ -108,7 +114,12 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
                     >
                         <Trash2 size={14} />
                     </button>
-                    <span className="text-sm font-medium text-white truncate flex-1">{item.category}</span>
+                    <input
+                        type="text"
+                        value={item.category}
+                        onChange={(e) => handleCategoryNameChange(idx, e.target.value)}
+                        className="flex-1 bg-transparent text-sm font-medium text-white focus:outline-none"
+                    />
                     <div className="flex items-center gap-2">
                         <span className="text-zinc-500 text-[10px] uppercase tracking-wider mr-1">Expected</span>
                         <span className="text-zinc-500 text-xs">$</span>

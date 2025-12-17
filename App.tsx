@@ -26,7 +26,7 @@ import {
   FileText as InvoiceIcon,
   Edit2
 } from 'lucide-react';
-import { LedgerType, Transaction, BudgetCategory, BankAccount, Property, UserProfile, Notification, MileageLog, DraftTransaction } from './types';
+import { LedgerType, Transaction, BudgetCategory, Property, UserProfile, Notification, MileageLog, DraftTransaction, Invoice } from './types';
 import { MetricsCard } from './components/MetricsCard';
 import { QuickCaptureDrawer } from './components/QuickCaptureDrawer';
 import { AuthScreen } from './components/AuthScreen';
@@ -42,6 +42,7 @@ import { NotificationModal } from './components/NotificationModal';
 import { BankStatementUpload } from './components/BankStatementUpload';
 import { TransactionEditor } from './components/TransactionEditor';
 import { InvoiceView } from './components/InvoiceView';
+import { InvoiceEditor } from './components/InvoiceEditor';
 import { ONTARIO_HST_RATE } from './constants';
 
 
@@ -59,11 +60,11 @@ export default function App() {
   // Data States
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgetData, setBudgetData] = useState<BudgetCategory[]>([]);
-  const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [mileageLogs, setMileageLogs] = useState<MileageLog[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   
   // Modals
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
@@ -71,6 +72,7 @@ export default function App() {
   const [isMileageModalOpen, setIsMileageModalOpen] = useState(false);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | 'new' | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -128,12 +130,12 @@ export default function App() {
     if (!session?.user) return;
     const { user } = session;
 
-    const [txRes, accRes, propRes, profRes, mileRes] = await Promise.all([
+    const [txRes, propRes, profRes, mileRes, invRes] = await Promise.all([
         supabase.from('transactions').select('*').order('date', { ascending: false }),
-        supabase.from('accounts').select('*'),
         supabase.from('properties').select('*'),
         supabase.from('profiles').select('*').eq('id', user.id).single(),
         supabase.from('mileage_logs').select('*').order('date', { ascending: false }),
+        supabase.from('invoices').select('*').order('invoice_date', { ascending: false }),
     ]);
     
     await fetchBudgets();
@@ -146,7 +148,6 @@ export default function App() {
         }));
         setTransactions(mappedTxs);
     }
-    if (accRes.data) setAccounts(accRes.data);
     if (propRes.data) {
         const mappedProps: Property[] = propRes.data.map((p: any) => ({
             id: p.id, address: p.address, purchasePrice: p.purchase_price, currentValue: p.current_value, ccaClass: p.cca_class,
@@ -157,13 +158,24 @@ export default function App() {
     if (mileRes.data) setMileageLogs(mileRes.data);
     if (profRes.data) setUserProfile(profRes.data);
     else setUserProfile({ id: user.id, full_name: '', role: 'Real Estate Professional', avatar_url: '' });
+    if (invRes.data) setInvoices(invRes.data);
   };
 
   const handleAddTransaction = async (newTransactionData: Omit<Transaction, 'id' | 'status'> | Omit<Transaction, 'id' | 'status'>[]) => {
     const txsToInsert = Array.isArray(newTransactionData) ? newTransactionData : [newTransactionData];
+    // FIX: Coerce potentially complex object types from AI to strings to prevent DB errors.
     const dbReadyTxs = txsToInsert.map(tx => ({
-        date: tx.date, vendor: tx.vendor, amount: tx.amount, type: tx.type, category: tx.category, tax_form: tx.taxForm,
-        property_id: tx.propertyId, hst_included: tx.hstIncluded, hst_amount: tx.hstAmount, is_split: tx.isSplit, receipt_url: tx.receiptUrl
+        date: tx.date,
+        vendor: String(tx.vendor), // Coerce to string to prevent object errors
+        amount: tx.amount,
+        type: tx.type,
+        category: String(tx.category), // Coerce to string
+        tax_form: tx.taxForm,
+        property_id: tx.propertyId,
+        hst_included: tx.hstIncluded,
+        hst_amount: tx.hstAmount,
+        is_split: tx.isSplit,
+        receipt_url: tx.receiptUrl
     }));
     const { data, error } = await supabase.from('transactions').insert(dbReadyTxs).select();
     if (error) throw error;
@@ -189,6 +201,18 @@ export default function App() {
     setTransactions(prev => prev.filter(t => t.id !== transactionId));
   };
   
+  const handleSaveInvoice = async (invoiceData: Omit<Invoice, 'id'> | Invoice) => {
+    const { error } = await supabase.from('invoices').upsert(invoiceData);
+    if (error) throw error;
+    await fetchInitialData();
+  };
+  
+  const handleDeleteInvoice = async (invoiceId: string) => {
+     const { error } = await supabase.from('invoices').delete().eq('id', invoiceId);
+     if (error) throw error;
+     setInvoices(prev => prev.filter(inv => inv.id !== invoiceId));
+  };
+
   const handleUpdateProfile = async (profileData: UserProfile) => {
     const { user } = session!;
     const { error } = await supabase.from('profiles').upsert({ ...profileData, id: user.id, updated_at: new Date() });
@@ -273,8 +297,8 @@ export default function App() {
             )}
             {currentView === 'analytics' && <AnalyticsView mode={ledgerMode} transactions={transactions} />}
             {currentView === 'mileage' && <MileageView logs={mileageLogs} onAddTrip={() => setIsMileageModalOpen(true)} />}
-            {currentView === 'invoices' && <InvoiceView />}
-            {currentView === 'profile' && <ProfileView profile={userProfile} accounts={accounts} onLogout={() => supabase.auth.signOut()} onConnectBank={() => {}} onUpdateProfile={handleUpdateProfile} onUploadAvatar={handleAvatarUpload} onDeleteAccount={async () => {}} theme={theme} onToggleTheme={toggleTheme} transactions={transactions} />}
+            {currentView === 'invoices' && <InvoiceView invoices={invoices} onNewInvoice={() => setEditingInvoice('new')} onEditInvoice={(inv) => setEditingInvoice(inv)} />}
+            {currentView === 'profile' && <ProfileView profile={userProfile} onLogout={() => supabase.auth.signOut()} onUpdateProfile={handleUpdateProfile} onUploadAvatar={handleAvatarUpload} theme={theme} onToggleTheme={toggleTheme} transactions={transactions} />}
         </div>
 
         <QuickCaptureDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onAddTransaction={handleAddTransaction} properties={properties} />
@@ -284,6 +308,13 @@ export default function App() {
         <NotificationModal isOpen={isNotificationModalOpen} onClose={() => setIsNotificationModalOpen(false)} notifications={notifications} />
         <BankStatementUpload isOpen={isStatementModalOpen} onClose={() => setIsStatementModalOpen(false)} onImport={handleAddTransaction} properties={properties} currentMode={ledgerMode} />
         <TransactionEditor isOpen={!!editingTransaction} onClose={() => setEditingTransaction(null)} transaction={editingTransaction} onSave={handleUpdateTransaction} onDelete={handleDeleteTransaction} properties={properties} />
+        <InvoiceEditor 
+            isOpen={!!editingInvoice} 
+            onClose={() => setEditingInvoice(null)} 
+            invoice={typeof editingInvoice === 'object' ? editingInvoice : null} 
+            onSave={handleSaveInvoice}
+            onDelete={handleDeleteInvoice}
+        />
 
         <div className="fixed bottom-0 left-0 right-0 z-40 max-w-2xl mx-auto p-4">
             <div className="bg-zinc-900/80 backdrop-blur-xl rounded-full flex items-center justify-around p-2 border border-white/10 shadow-2xl shadow-black/40">
@@ -323,7 +354,8 @@ interface TransactionItemProps {
   onEdit: () => void;
 }
 
-const TransactionItem = ({ tx, onEdit }: TransactionItemProps) => {
+// FIX: Changed component to be of type React.FC to fix typing error with the 'key' prop.
+const TransactionItem: React.FC<TransactionItemProps> = ({ tx, onEdit }) => {
     const isIncome = tx.amount > 0;
     return (
         <div className="flex items-center gap-3 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 rounded-lg">

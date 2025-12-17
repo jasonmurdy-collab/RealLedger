@@ -19,6 +19,7 @@ export interface UserProfile {
   commission_split?: number; // e.g., 80 for 80%
   annual_cap?: number; // in dollars
   royalty_fee?: number; // as a percentage
+  max_royalty_contribution?: number; // max royalty in dollars
   transaction_fee?: number; // in dollars
   cap_anniversary_date?: string; // YYYY-MM-DD
 }
@@ -100,23 +101,27 @@ export interface BudgetCategory {
   user_id?: string; // Added for Supabase RLS
 }
 
-export interface BankAccount {
-  id: string;
-  name: string;
-  type: string;
-  mask: string;
-  institution: string;
-  defaultContext?: LedgerType;
-  user_id?: string; // Added for Supabase RLS
+// Updated Invoice and related types
+export interface LineItem {
+  id: string; // local UI id
+  description: string;
+  quantity: number;
+  price: number;
 }
 
-// New Invoice Type
 export interface Invoice {
   id: string;
   invoice_number: string;
   client_name: string;
-  amount: number;
+  client_email?: string;
+  client_address?: string;
+  invoice_date: string;
   due_date: string;
-  status: 'draft' | 'sent' | 'paid';
+  items: LineItem[];
+  notes?: string;
+  status: 'draft' | 'sent' | 'paid' | 'overdue';
   user_id?: string;
+  subtotal: number;
+  hst_amount: number;
+  total_amount: number;
 }

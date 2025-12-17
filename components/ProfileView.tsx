@@ -1,24 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Settings, CreditCard, Lock, HelpCircle, ChevronRight, LogOut, ShieldCheck, FileText, Plus, Edit2, Save, X, Camera, UploadCloud, Trash2, Sun, Moon, Download, Percent, Calendar, DollarSign } from 'lucide-react';
-import { BankAccount, UserProfile, Transaction } from '../types';
+import { UserProfile, Transaction } from '../types';
 import { ProUpgradeModal } from './ProUpgradeModal';
+import { MONTH_NAMES } from '../constants';
 
 type SaveStatus = 'idle' | 'saving' | 'success' | 'error';
 
 interface ProfileViewProps {
-  accounts: BankAccount[];
   profile: UserProfile | null;
   onLogout: () => void;
-  onConnectBank: () => void;
   onUpdateProfile: (profile: UserProfile) => Promise<void>;
   onUploadAvatar: (file: File) => Promise<void>;
-  onDeleteAccount: (accountId: string) => Promise<void>;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   transactions: Transaction[];
 }
 
-export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onLogout, onConnectBank, onUpdateProfile, onUploadAvatar, onDeleteAccount, theme, onToggleTheme, transactions }) => {
+export const ProfileView: React.FC<ProfileViewProps> = ({ profile, onLogout, onUpdateProfile, onUploadAvatar, theme, onToggleTheme, transactions }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<UserProfile>({
     full_name: '',
@@ -30,6 +28,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
     commission_split: 80,
     annual_cap: 16000,
     royalty_fee: 6,
+    max_royalty_contribution: 5000,
     transaction_fee: 250,
     cap_anniversary_date: ''
   });
@@ -46,6 +45,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
         commission_split: profile.commission_split || 80,
         annual_cap: profile.annual_cap || 16000,
         royalty_fee: profile.royalty_fee || 6,
+        max_royalty_contribution: profile.max_royalty_contribution || 5000,
         transaction_fee: profile.transaction_fee || 250,
         cap_anniversary_date: profile.cap_anniversary_date || ''
       });
@@ -79,7 +79,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
   };
 
   const handleChange = (field: keyof UserProfile, value: string | number) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    if (field === 'cap_anniversary_date') {
+        const monthIndex = parseInt(value as string, 10);
+        if (!isNaN(monthIndex)) {
+            const currentYear = new Date().getFullYear();
+            // Create a date string for the first day of the selected month in UTC
+            const month = (monthIndex + 1).toString().padStart(2, '0');
+            const dateString = `${currentYear}-${month}-01`;
+            setFormData(prev => ({ ...prev, cap_anniversary_date: dateString }));
+        }
+    } else {
+        setFormData(prev => ({ ...prev, [field]: value }));
+    }
   };
 
   const exportTaxCsv = (formType: 't2125' | 't776') => {
@@ -240,26 +251,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
                            />
                         </div>
                         <div>
-                           <label className="text-xs text-zinc-500 mb-1 block">Royalty Fee (%)</label>
-                           <input 
-                               type="number" 
-                               value={formData.royalty_fee || ''} 
-                               onChange={(e) => handleChange('royalty_fee', parseInt(e.target.value, 10))}
-                               className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
-                           />
-                        </div>
-                     </div>
-                     <div className="grid grid-cols-2 gap-4">
-                        <div>
-                           <label className="text-xs text-zinc-500 mb-1 block">Annual Cap ($)</label>
-                           <input 
-                               type="number" 
-                               value={formData.annual_cap || ''} 
-                               onChange={(e) => handleChange('annual_cap', parseInt(e.target.value, 10))}
-                               className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
-                           />
-                        </div>
-                        <div>
                            <label className="text-xs text-zinc-500 mb-1 block">Transaction Fee ($)</label>
                            <input 
                                type="number" 
@@ -269,22 +260,58 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
                            />
                         </div>
                      </div>
-                      <div>
-                           <label className="text-xs text-zinc-500 mb-1 block">Cap Anniversary Date</label>
+                     <div className="grid grid-cols-2 gap-4">
+                        <div>
+                           <label className="text-xs text-zinc-500 mb-1 block">Royalty Fee (%)</label>
                            <input 
-                               type="date"
-                               value={formData.cap_anniversary_date || ''}
-                               onChange={(e) => handleChange('cap_anniversary_date', e.target.value)}
+                               type="number" 
+                               value={formData.royalty_fee || ''} 
+                               onChange={(e) => handleChange('royalty_fee', parseInt(e.target.value, 10))}
                                className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
                            />
                         </div>
+                        <div>
+                           <label className="text-xs text-zinc-500 mb-1 block">Max Royalty ($)</label>
+                           <input 
+                               type="number" 
+                               value={formData.max_royalty_contribution || ''} 
+                               onChange={(e) => handleChange('max_royalty_contribution', parseInt(e.target.value, 10))}
+                               className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
+                           />
+                        </div>
+                     </div>
+                     <div className="grid grid-cols-2 gap-4">
+                         <div>
+                           <label className="text-xs text-zinc-500 mb-1 block">Annual Cap ($)</label>
+                           <input 
+                               type="number" 
+                               value={formData.annual_cap || ''} 
+                               onChange={(e) => handleChange('annual_cap', parseInt(e.target.value, 10))}
+                               className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
+                           />
+                        </div>
+                        <div>
+                           <label className="text-xs text-zinc-500 mb-1 block">Anniversary Month</label>
+                           <select
+                                value={formData.cap_anniversary_date ? new Date(formData.cap_anniversary_date).getUTCMonth() : ''}
+                                onChange={(e) => handleChange('cap_anniversary_date', e.target.value)}
+                                className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded p-2 text-zinc-900 dark:text-white text-sm"
+                           >
+                            <option value="" disabled>Select Month</option>
+                            {MONTH_NAMES.map((month, index) => (
+                                <option key={index} value={index}>{month}</option>
+                            ))}
+                           </select>
+                        </div>
+                     </div>
                  </div>
              ) : (
                  <div className="grid grid-cols-2 gap-y-4 gap-x-2">
                     <CommissionStat icon={<Percent size={14} />} label="Your Split" value={`${formData.commission_split || 0}%`} />
-                    <CommissionStat icon={<DollarSign size={14} />} label="Annual Cap" value={`$${(formData.annual_cap || 0).toLocaleString()}`} />
-                    <CommissionStat icon={<Percent size={14} />} label="Royalty Fee" value={`${formData.royalty_fee || 0}%`} />
                     <CommissionStat icon={<DollarSign size={14} />} label="Transaction Fee" value={`$${formData.transaction_fee || 0}`} />
+                    <CommissionStat icon={<Percent size={14} />} label="Royalty Fee" value={`${formData.royalty_fee || 0}%`} />
+                    <CommissionStat icon={<DollarSign size={14} />} label="Max Royalty" value={`$${(formData.max_royalty_contribution || 0).toLocaleString()}`} />
+                    <CommissionStat icon={<DollarSign size={14} />} label="Annual Cap" value={`$${(formData.annual_cap || 0).toLocaleString()}`} />
                     <CommissionStat icon={<Calendar size={14} />} label="Anniversary" value={formData.cap_anniversary_date ? new Date(formData.cap_anniversary_date).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', timeZone: 'UTC' }) : 'Not Set'} />
                  </div>
              )}
@@ -297,7 +324,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ accounts, profile, onL
         Sign Out
       </button>
 
-      <p className="text-center text-xs text-zinc-600 pb-4">Version 3.1.0</p>
+      <p className="text-center text-xs text-zinc-600 pb-4">Version 3.2.0</p>
     </div>
     <ProUpgradeModal isOpen={isProModalOpen} onClose={() => setIsProModalOpen(false)} onConfirm={() => {}} />
     </>
