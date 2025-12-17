@@ -314,6 +314,7 @@ export default function App() {
             invoice={typeof editingInvoice === 'object' ? editingInvoice : null} 
             onSave={handleSaveInvoice}
             onDelete={handleDeleteInvoice}
+            profile={userProfile}
         />
 
         <div className="fixed bottom-0 left-0 right-0 z-40 max-w-2xl mx-auto p-4">
