@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
@@ -52,9 +52,16 @@
     </script>
     <style>
       body {
+        transition: background-color 0.3s ease, color 0.3s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .dark body {
         background-color: #09090b; /* Zinc-950 */
         color: #e4e4e7; /* Zinc-200 */
-        -webkit-tap-highlight-color: transparent;
+      }
+      body {
+        background-color: #f4f4f5; /* Zinc-100 */
+        color: #18181b; /* Zinc-900 */
       }
       /* Custom Range Slider Styling */
       input[type=range] {
@@ -69,6 +76,9 @@
         background: white;
         cursor: pointer;
         margin-top: -12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      }
+      .dark input[type=range]::-webkit-slider-thumb {
         box-shadow: 0 0 10px rgba(0,0,0,0.5);
       }
       input[type=range]::-webkit-slider-runnable-track {

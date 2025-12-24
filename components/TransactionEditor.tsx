@@ -68,107 +68,107 @@ export const TransactionEditor: React.FC<TransactionEditorProps> = ({ isOpen, on
     });
   };
 
-  const amount = Math.abs(formData.amount); // Work with positive numbers for the input
+  const amount = Math.abs(formData.amount); 
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6">
-      <div className="bg-zinc-900 w-full max-w-md rounded-2xl p-6 border border-white/10 animate-slide-up">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 dark:bg-black/80 backdrop-blur-sm p-4 sm:p-6">
+      <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-3xl p-6 border border-zinc-200 dark:border-white/10 animate-slide-up shadow-2xl transition-colors">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold text-white">Edit Transaction</h3>
-          <button onClick={onClose} className="p-2 bg-zinc-800 rounded-full hover:bg-zinc-700">
-            <X size={18} className="text-zinc-400" />
+          <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Edit Transaction</h3>
+          <button onClick={onClose} className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors">
+            <X size={18} className="text-zinc-500 dark:text-zinc-400" />
           </button>
         </div>
 
         <div className="space-y-4 max-h-[70vh] overflow-y-auto hide-scrollbar pr-2">
             <div>
-                <label className="text-xs text-zinc-400 ml-1 mb-1 block">Date</label>
+                <label className="text-xs text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-bold tracking-widest">Date</label>
                 <input 
                   type="date" 
                   value={formData.date}
                   onChange={(e) => handleChange('date', e.target.value)}
-                  className="w-full bg-zinc-800/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-rose-500 transition-colors"
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 transition-colors"
                 />
             </div>
              <div>
-                <label className="text-xs text-zinc-400 ml-1 mb-1 block">Vendor</label>
+                <label className="text-xs text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-bold tracking-widest">Vendor</label>
                 <input 
                   type="text" 
                   value={formData.vendor}
                   onChange={(e) => handleChange('vendor', e.target.value)}
-                  className="w-full bg-zinc-800/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-rose-500 transition-colors"
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 transition-colors"
                 />
             </div>
              <div className="grid grid-cols-2 gap-4">
                 <div>
-                    <label className="text-xs text-zinc-400 ml-1 mb-1 block">Amount</label>
+                    <label className="text-xs text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-bold tracking-widest">Amount</label>
                     <input 
                       type="number" 
                       value={amount}
                       onChange={(e) => handleChange('amount', formData.amount >= 0 ? parseFloat(e.target.value) : -parseFloat(e.target.value))}
-                      className="w-full bg-zinc-800/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-rose-500 transition-colors"
+                      className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 transition-colors"
                     />
                 </div>
                 <div>
-                    <label className="text-xs text-zinc-400 ml-1 mb-1 block">Category</label>
+                    <label className="text-xs text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-bold tracking-widest">Category</label>
                     <input 
                       type="text" 
                       value={formData.category}
                       onChange={(e) => handleChange('category', e.target.value)}
-                      className="w-full bg-zinc-800/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-rose-500 transition-colors"
+                      className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 transition-colors"
                     />
                 </div>
              </div>
              <div>
-                 <label className="text-xs text-zinc-400 ml-1 mb-1 block">Ledger</label>
-                 <div className="flex bg-zinc-800/50 p-1 rounded-xl border border-white/10">
-                    <button onClick={() => handleLedgerTypeChange('active')} className={`flex-1 py-2 text-sm font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors ${formData.type === 'active' ? 'bg-rose-500 text-white' : 'text-zinc-400'}`}><Briefcase size={16}/> Active</button>
-                    <button onClick={() => handleLedgerTypeChange('passive')} className={`flex-1 py-2 text-sm font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors ${formData.type === 'passive' ? 'bg-cyan-500 text-white' : 'text-zinc-400'}`}><Building size={16}/> Passive</button>
-                    <button onClick={() => handleLedgerTypeChange('personal')} className={`flex-1 py-2 text-sm font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors ${formData.type === 'personal' ? 'bg-violet-500 text-white' : 'text-zinc-400'}`}><User size={16}/> Personal</button>
+                 <label className="text-xs text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-bold tracking-widest">Ledger</label>
+                 <div className="flex bg-zinc-100 dark:bg-zinc-800/50 p-1 rounded-xl border border-zinc-200 dark:border-white/10">
+                    <button onClick={() => handleLedgerTypeChange('active')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${formData.type === 'active' ? 'bg-rose-500 text-white shadow-md' : 'text-zinc-500 hover:text-rose-500'}`}><Briefcase size={14}/> Active</button>
+                    <button onClick={() => handleLedgerTypeChange('passive')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${formData.type === 'passive' ? 'bg-cyan-500 text-white shadow-md' : 'text-zinc-500 hover:text-cyan-500'}`}><Building size={14}/> Passive</button>
+                    <button onClick={() => handleLedgerTypeChange('personal')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${formData.type === 'personal' ? 'bg-violet-500 text-white shadow-md' : 'text-zinc-500 hover:text-violet-500'}`}><User size={14}/> Personal</button>
                  </div>
              </div>
              {formData.type === 'passive' && properties.length > 0 && (
                 <div className="animate-slide-up">
-                    <label className="text-xs text-zinc-400 ml-1 mb-1 block">Assign to Property</label>
+                    <label className="text-xs text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-bold tracking-widest">Assign to Property</label>
                     <select
                         value={formData.propertyId || ''}
                         onChange={(e) => handleChange('propertyId', e.target.value)}
-                        className="w-full bg-zinc-800/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                        className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-zinc-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors"
                     >
-                        {properties.map(p => <option key={p.id} value={p.id}>{p.address}</option>)}
+                        {properties.map(p => <option key={p.id} value={p.id} className="bg-white dark:bg-zinc-900">{p.address}</option>)}
                     </select>
                 </div>
              )}
-             <div className="flex items-center justify-center">
-                 <label className="flex items-center gap-2 cursor-pointer text-sm text-zinc-300">
+             <div className="flex items-center justify-center py-2">
+                 <label className="flex items-center gap-3 cursor-pointer text-sm text-zinc-600 dark:text-zinc-300 font-medium">
                     <input
                         type="checkbox"
                         checked={!!formData.hstIncluded}
                         onChange={(e) => handleChange('hstIncluded', e.target.checked)}
-                        className="w-4 h-4 rounded bg-zinc-700 border-zinc-500 text-emerald-500 focus:ring-emerald-500/50"
+                        className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-700 text-rose-500 focus:ring-rose-500/50"
                     />
-                    HST Included
+                    Tax (HST) Included
                  </label>
              </div>
         </div>
 
-        <div className="flex gap-4 mt-6">
+        <div className="flex gap-4 mt-8">
             <button 
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="w-1/3 py-3 bg-rose-500/10 text-rose-400 font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-rose-500/20 transition-colors disabled:opacity-50"
+                className="w-1/4 py-3.5 bg-rose-500/10 text-rose-500 font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-rose-500/20 transition-all disabled:opacity-50 active:scale-95 border border-rose-500/20"
             >
-                {isDeleting ? <div className="w-5 h-5 border-2 border-rose-400/30 border-t-rose-400 rounded-full animate-spin"></div> : <Trash2 size={18} />}
+                {isDeleting ? <div className="w-5 h-5 border-2 border-rose-400/30 border-t-rose-400 rounded-full animate-spin"></div> : <Trash2 size={20} />}
             </button>
             <button 
                 onClick={handleSave} 
                 disabled={isSaving}
-                className="w-2/3 py-3 bg-white text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-zinc-200 transition-colors disabled:opacity-50"
+                className="w-3/4 py-3.5 bg-zinc-900 dark:bg-white text-white dark:text-black font-black rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition-all disabled:opacity-50 active:scale-95 shadow-lg shadow-zinc-500/10"
             >
                 {isSaving ? (
-                    <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+                    <div className="w-5 h-5 border-2 border-zinc-400 border-t-zinc-900 rounded-full animate-spin"></div>
                 ) : (
-                    <><Save size={18} /> Save Changes</>
+                    <><Save size={20} /> Deploy Update</>
                 )}
             </button>
         </div>

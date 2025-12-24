@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from './supabaseClient';
 import { Session } from '@supabase/supabase-js';
 import { 
@@ -24,7 +24,10 @@ import {
   Moon,
   Upload,
   FileText as InvoiceIcon,
-  Edit2
+  Edit2,
+  Search,
+  Filter,
+  ListFilter
 } from 'lucide-react';
 import { LedgerType, Transaction, BudgetCategory, Property, UserProfile, Notification, MileageLog, DraftTransaction, Invoice } from './types';
 import { MetricsCard } from './components/MetricsCard';
@@ -34,6 +37,7 @@ import { PropertyCard } from './components/PropertyCard';
 import { PropertyEditor } from './components/PropertyEditor';
 import { PersonalBudgetCard } from './components/PersonalBudgetCard';
 import { AnalyticsView } from './components/AnalyticsView';
+import { ExpensesView } from './components/ExpensesView';
 import { ProfileView } from './components/ProfileView';
 import { BudgetEditor } from './components/BudgetEditor';
 import { MileageView } from './components/MileageView';
@@ -46,7 +50,7 @@ import { InvoiceEditor } from './components/InvoiceEditor';
 import { ONTARIO_HST_RATE } from './constants';
 
 
-type ViewType = 'home' | 'analytics' | 'mileage' | 'invoices' | 'profile';
+type ViewType = 'home' | 'analytics' | 'expenses' | 'mileage' | 'invoices' | 'profile';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -59,7 +63,7 @@ export default function App() {
   
   // Data States
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [budgetData, setBudgetData] = useState<BudgetCategory[]>([]);
+  const [budgetSettings, setBudgetSettings] = useState<BudgetCategory[]>([]); 
   const [properties, setProperties] = useState<Property[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [mileageLogs, setMileageLogs] = useState<MileageLog[]>([]);
@@ -98,11 +102,40 @@ export default function App() {
     const { data, error } = await supabase.from('budget_categories').select('*');
     if (error) console.error("Error fetching budget categories:", error);
     if (data) {
-        setBudgetData(data.map((b: any) => ({
-            category: b.category, spent: b.spent, limit: b.limit, savingsGoal: b.savings_goal, user_id: b.user_id
+        setBudgetSettings(data.map((b: any) => ({
+            id: b.id,
+            category: b.category, 
+            spent: 0, 
+            limit: b.limit, 
+            savingsGoal: b.savings_goal, 
+            user_id: b.user_id
         })));
     }
   };
+  
+  const calculatedBudgetData = useMemo(() => {
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      const spendingMap = new Map<string, number>();
+      
+      transactions
+        .filter(t => 
+            t.type === 'personal' && 
+            t.amount < 0 && 
+            new Date(t.date).getMonth() === currentMonth &&
+            new Date(t.date).getFullYear() === currentYear
+        )
+        .forEach(t => {
+            const cat = t.category;
+            const amt = Math.abs(t.amount);
+            spendingMap.set(cat, (spendingMap.get(cat) || 0) + amt);
+        });
+
+      return budgetSettings.map(b => ({
+          ...b,
+          spent: spendingMap.get(b.category) || 0
+      }));
+  }, [transactions, budgetSettings]);
 
   useEffect(() => {
     if (session) {
@@ -115,15 +148,17 @@ export default function App() {
     transactions
       .filter(t => t.status === 'pending')
       .forEach(t => newNotifications.push({ id: `tx-${t.id}`, type: 'pending_tx', message: `Review: ${t.vendor} ($${Math.abs(t.amount)})`, date: new Date(t.date), relatedId: t.id }));
-    budgetData
-      .filter(b => b.spent > b.limit)
+    
+    calculatedBudgetData
+      .filter(b => b.limit > 0 && b.spent > b.limit)
       .forEach(b => newNotifications.push({ id: `budget-${b.category}`, type: 'budget_over', message: `Over Budget: ${b.category} (-$${(b.spent - b.limit).toFixed(0)})`, date: new Date(), relatedId: b.category }));
+      
     const currentMonth = new Date().getMonth();
     if ([2, 5, 8, 11].includes(currentMonth)) {
          newNotifications.push({ id: 'hst-remit', type: 'hst_remittance', message: 'Quarterly HST Remittance due soon.', date: new Date() });
     }
     setNotifications(newNotifications.sort((a, b) => b.date.getTime() - a.date.getTime()));
-  }, [transactions, budgetData]);
+  }, [transactions, calculatedBudgetData]);
 
 
   const fetchInitialData = async () => {
@@ -160,22 +195,72 @@ export default function App() {
     else setUserProfile({ id: user.id, full_name: '', role: 'Real Estate Professional', avatar_url: '' });
     if (invRes.data) setInvoices(invRes.data);
   };
+  
+  const handleSaveBudget = async (newBudgets: BudgetCategory[]) => {
+    if (!session?.user) return;
+
+    const originalBudgets = budgetSettings;
+    const originalBudgetMap = new Map(originalBudgets.map(b => [b.id, b]));
+    const newBudgetMap = new Map(newBudgets.filter(b => b.id).map(b => [b.id, b]));
+
+    const promises: Promise<any>[] = [];
+
+    // 1. Handle Deletions: If an ID from original map is not in new map, it was deleted.
+    for (const id of originalBudgetMap.keys()) {
+      if (typeof id === 'string' && !newBudgetMap.has(id)) {
+        promises.push(supabase.from('budget_categories').delete().eq('id', id));
+      }
+    }
+
+    // 2. Handle Additions and Updates
+    for (const newBudget of newBudgets) {
+      if (newBudget.id) {
+        const originalBudget = originalBudgetMap.get(newBudget.id) as BudgetCategory | undefined;
+        if (originalBudget && (originalBudget.category !== newBudget.category || originalBudget.limit !== newBudget.limit || originalBudget.savingsGoal !== newBudget.savingsGoal)) {
+          promises.push(
+            supabase
+              .from('budget_categories')
+              .update({ category: newBudget.category, limit: newBudget.limit, savings_goal: newBudget.savingsGoal ?? null })
+              .eq('id', newBudget.id)
+          );
+        }
+      } else {
+        promises.push(
+          supabase.from('budget_categories').insert({
+            category: newBudget.category,
+            limit: newBudget.limit,
+            savings_goal: newBudget.savingsGoal ?? null,
+            user_id: session.user.id,
+          })
+        );
+      }
+    }
+    
+    const results = await Promise.allSettled(promises);
+    results.forEach(result => {
+        if (result.status === 'rejected') {
+            console.error("A budget operation failed:", result.reason);
+        }
+    });
+    
+    await fetchBudgets();
+  };
 
   const handleAddTransaction = async (newTransactionData: Omit<Transaction, 'id' | 'status'> | Omit<Transaction, 'id' | 'status'>[]) => {
     const txsToInsert = Array.isArray(newTransactionData) ? newTransactionData : [newTransactionData];
-    // FIX: Coerce potentially complex object types from AI to strings to prevent DB errors.
     const dbReadyTxs = txsToInsert.map(tx => ({
         date: tx.date,
-        vendor: String(tx.vendor), // Coerce to string to prevent object errors
+        vendor: String(tx.vendor), 
         amount: tx.amount,
         type: tx.type,
-        category: String(tx.category), // Coerce to string
+        category: String(tx.category), 
         tax_form: tx.taxForm,
         property_id: tx.propertyId,
         hst_included: tx.hstIncluded,
         hst_amount: tx.hstAmount,
         is_split: tx.isSplit,
-        receipt_url: tx.receiptUrl
+        receipt_url: tx.receiptUrl,
+        user_id: session?.user.id
     }));
     const { data, error } = await supabase.from('transactions').insert(dbReadyTxs).select();
     if (error) throw error;
@@ -202,7 +287,7 @@ export default function App() {
   };
   
   const handleSaveInvoice = async (invoiceData: Omit<Invoice, 'id'> | Invoice) => {
-    const { error } = await supabase.from('invoices').upsert(invoiceData);
+    const { error } = await supabase.from('invoices').upsert({ ...invoiceData, user_id: session?.user.id });
     if (error) throw error;
     await fetchInitialData();
   };
@@ -233,97 +318,196 @@ export default function App() {
   if (!session) return <AuthScreen />;
   
   const bgGradient = theme === 'dark' ? 
-    ledgerMode === 'active' ? 'from-rose-900/40' : ledgerMode === 'passive' ? 'from-cyan-900/40' : 'from-violet-900/40'
-    : ledgerMode === 'active' ? 'from-rose-100' : ledgerMode === 'passive' ? 'from-cyan-100' : 'from-violet-100';
+    ledgerMode === 'active' ? 'from-rose-900/20' : ledgerMode === 'passive' ? 'from-cyan-900/20' : 'from-violet-900/20'
+    : ledgerMode === 'active' ? 'from-rose-500/10' : ledgerMode === 'passive' ? 'from-cyan-500/10' : 'from-violet-500/10';
 
   return (
-    <div className={`min-h-screen font-sans bg-zinc-100 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 transition-colors duration-300`}>
-        <div className={`absolute inset-x-0 top-0 h-96 bg-gradient-to-b ${bgGradient} to-transparent transition-all duration-500`}></div>
-        
-        <div className="relative max-w-2xl mx-auto px-4 pb-32">
-            <header className="pt-8 pb-6 flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-700 flex items-center justify-center border border-white/10 shadow-lg">
-                        <span className="text-sm font-bold text-white tracking-tighter">RL</span>
-                    </div>
-                    <div>
-                        <h1 className="text-xl font-bold text-zinc-900 dark:text-white">
-                            {currentView.charAt(0).toUpperCase() + currentView.slice(1)}
-                        </h1>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    <button onClick={() => setIsNotificationModalOpen(true)} className="relative p-2.5 bg-white/80 dark:bg-glass-200 backdrop-blur-md rounded-full border border-zinc-200 dark:border-white/10 shadow-sm">
-                        <Bell size={16} className="text-zinc-600 dark:text-zinc-300"/>
-                        {notifications.length > 0 && <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-zinc-100 dark:border-zinc-900"></div>}
-                    </button>
-                    <button onClick={fetchInitialData} className="p-2.5 bg-white/80 dark:bg-glass-200 backdrop-blur-md rounded-full border border-zinc-200 dark:border-white/10 shadow-sm">
-                        <RefreshCw size={16} className="text-zinc-600 dark:text-zinc-300"/>
-                    </button>
-                </div>
-            </header>
-            
-            {currentView === 'home' && (
-                <main>
-                    <div className="flex bg-white/50 dark:bg-glass-100 backdrop-blur-xl p-1.5 rounded-2xl mb-6 border border-zinc-200 dark:border-white/5 shadow-lg">
-                        <TabButton label="Active" icon={<Briefcase size={16} />} isActive={ledgerMode === 'active'} onClick={() => setLedgerMode('active')} color="rose" />
-                        <TabButton label="Passive" icon={<Building2 size={16} />} isActive={ledgerMode === 'passive'} onClick={() => setLedgerMode('passive')} color="cyan" />
-                        <TabButton label="Personal" icon={<UserCircle size={16} />} isActive={ledgerMode === 'personal'} onClick={() => setLedgerMode('personal')} color="violet" />
-                    </div>
-                    <MetricsCard mode={ledgerMode} transactions={transactions} properties={properties} />
+    <div className={`min-h-screen font-sans bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-200 transition-colors duration-300 overflow-hidden flex`}>
+        {/* Desktop Sidebar */}
+        <div className="hidden lg:flex w-64 flex-col border-r border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-zinc-950/50 backdrop-blur-xl h-screen fixed left-0 top-0 z-50 transition-colors">
+           <div className="p-6 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-zinc-900 dark:bg-gradient-to-tr dark:from-zinc-800 dark:to-zinc-700 flex items-center justify-center border border-zinc-200 dark:border-white/10 shadow-sm">
+                  <span className="text-lg font-bold text-white tracking-tighter">RL</span>
+              </div>
+              <span className="font-bold text-lg text-zinc-900 dark:text-white">RealLedger</span>
+           </div>
+           
+           <nav className="flex-1 px-4 space-y-2">
+              <SidebarLink icon={<LayoutDashboard size={20} />} label="Home" isActive={currentView === 'home'} onClick={() => setCurrentView('home')} />
+              <SidebarLink icon={<PieChart size={20} />} label="Analytics" isActive={currentView === 'analytics'} onClick={() => setCurrentView('analytics')} />
+              <SidebarLink icon={<Search size={20} />} label="Expenses" isActive={currentView === 'expenses'} onClick={() => setCurrentView('expenses')} />
+              <SidebarLink icon={<Car size={20} />} label="Mileage" isActive={currentView === 'mileage'} onClick={() => setCurrentView('mileage')} />
+              <SidebarLink icon={<InvoiceIcon size={20} />} label="Invoices" isActive={currentView === 'invoices'} onClick={() => setCurrentView('invoices')} />
+              <div className="h-px bg-zinc-200 dark:bg-white/5 my-4 mx-2" />
+              <SidebarLink icon={<UserCircle size={20} />} label="Profile" isActive={currentView === 'profile'} onClick={() => setCurrentView('profile')} />
+           </nav>
 
-                    {ledgerMode === 'passive' && (
-                        <div>
-                            <div className="flex justify-between items-center mb-2">
-                                <h2 className="font-bold text-zinc-900 dark:text-white">Properties</h2>
-                                <button onClick={() => setIsPropertyModalOpen(true)} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold border transition-colors bg-cyan-500/10 text-cyan-500 dark:text-cyan-400 border-cyan-500/20 hover:bg-cyan-500/20"><Plus size={12} /> Add</button>
-                            </div>
-                            {properties.map(p => <PropertyCard key={p.id} property={p} transactions={transactions} />)}
-                        </div>
-                    )}
-                    {ledgerMode === 'personal' && <PersonalBudgetCard budgetData={budgetData} onEdit={() => setIsBudgetModalOpen(true)} />}
-                    {ledgerMode !== 'personal' && (
-                         <div>
-                            <div className="flex justify-between items-center mb-2">
-                                <h2 className="font-bold text-zinc-900 dark:text-white">Recent Transactions</h2>
-                                <button onClick={() => setIsStatementModalOpen(true)} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold border transition-colors bg-zinc-200/50 dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400 border-zinc-300/50 dark:border-white/10 hover:bg-zinc-200 dark:hover:bg-zinc-700/50"><Upload size={12} /> Import</button>
-                            </div>
-                            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-2xl p-2 space-y-1 shadow-sm">
-                                {transactions.filter(t => t.type === ledgerMode).slice(0, 5).map(tx => <TransactionItem key={tx.id} tx={tx} onEdit={() => setEditingTransaction(tx)} />)}
-                            </div>
-                         </div>
-                    )}
-                </main>
-            )}
-            {currentView === 'analytics' && <AnalyticsView mode={ledgerMode} transactions={transactions} />}
-            {currentView === 'mileage' && <MileageView logs={mileageLogs} onAddTrip={() => setIsMileageModalOpen(true)} />}
-            {currentView === 'invoices' && <InvoiceView invoices={invoices} onNewInvoice={() => setEditingInvoice('new')} onEditInvoice={(inv) => setEditingInvoice(inv)} />}
-            {currentView === 'profile' && <ProfileView profile={userProfile} onLogout={() => supabase.auth.signOut()} onUpdateProfile={handleUpdateProfile} onUploadAvatar={handleAvatarUpload} theme={theme} onToggleTheme={toggleTheme} transactions={transactions} />}
+           <div className="p-4">
+              <button onClick={() => setIsDrawerOpen(true)} className="w-full py-3 bg-zinc-900 dark:bg-white text-white dark:text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition-opacity shadow-lg">
+                  <Plus size={20} /> New Entry
+              </button>
+           </div>
         </div>
 
-        <QuickCaptureDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onAddTransaction={handleAddTransaction} properties={properties} />
-        <PropertyEditor isOpen={isPropertyModalOpen} onClose={() => setIsPropertyModalOpen(false)} onSave={async (p) => { await supabase.from('properties').insert({...p, purchase_price:p.purchasePrice, current_value: p.currentValue, cca_class: p.ccaClass, opening_ucc: p.openingUcc, tenant_name: p.tenantName, lease_end: p.leaseEnd, mortgage_balance: p.mortgageBalance}); fetchInitialData(); }} />
-        <BudgetEditor isOpen={isBudgetModalOpen} onClose={() => setIsBudgetModalOpen(false)} budgetData={budgetData} onSave={async (b) => { await supabase.from('budget_categories').delete().neq('user_id', '0'); await supabase.from('budget_categories').insert(b.map(i => ({...i, savings_goal: i.savingsGoal}))); fetchBudgets(); }} />
-        <MileageEditor isOpen={isMileageModalOpen} onClose={() => setIsMileageModalOpen(false)} onSave={async (log) => { await supabase.from('mileage_logs').insert(log); fetchInitialData(); }} />
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col h-screen overflow-y-auto w-full lg:pl-64 transition-colors bg-zinc-50 dark:bg-zinc-950">
+             <div className={`absolute inset-x-0 top-0 h-96 bg-gradient-to-b ${bgGradient} to-transparent transition-all duration-500 pointer-events-none`}></div>
+             
+             <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-32 w-full">
+                <header className="pt-8 pb-6 flex justify-between items-center lg:hidden">
+                    <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-full bg-zinc-900 dark:bg-gradient-to-tr dark:from-zinc-800 dark:to-zinc-700 flex items-center justify-center border border-zinc-200 dark:border-white/10 shadow-sm">
+                            <span className="text-sm font-bold text-white tracking-tighter">RL</span>
+                        </div>
+                        <div>
+                            <h1 className="text-xl font-bold text-zinc-900 dark:text-white">
+                                {currentView.charAt(0).toUpperCase() + currentView.slice(1)}
+                            </h1>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setIsNotificationModalOpen(true)} className="relative p-2.5 bg-white dark:bg-zinc-800 backdrop-blur-md rounded-full border border-zinc-200 dark:border-white/10 shadow-sm">
+                            <Bell size={16} className="text-zinc-600 dark:text-zinc-300"/>
+                            {notifications.length > 0 && <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white dark:border-zinc-900"></div>}
+                        </button>
+                        <button onClick={fetchInitialData} className="p-2.5 bg-white dark:bg-zinc-800 backdrop-blur-md rounded-full border border-zinc-200 dark:border-white/10 shadow-sm">
+                            <RefreshCw size={16} className="text-zinc-600 dark:text-zinc-300"/>
+                        </button>
+                    </div>
+                </header>
+
+                {/* Desktop Header Actions */}
+                <header className="hidden lg:flex justify-between items-center py-8">
+                     <h1 className="text-3xl font-bold text-zinc-900 dark:text-white">
+                        {currentView === 'home' ? `Welcome back, ${userProfile?.full_name?.split(' ')[0] || 'User'}` : currentView.charAt(0).toUpperCase() + currentView.slice(1)}
+                     </h1>
+                     <div className="flex items-center gap-3">
+                         <button onClick={toggleTheme} className="p-3 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-white/10 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors shadow-sm">
+                            {theme === 'dark' ? <Sun size={20} className="text-zinc-400"/> : <Moon size={20} className="text-zinc-600"/>}
+                         </button>
+                         <button onClick={() => setIsNotificationModalOpen(true)} className="relative p-3 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-white/10 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors shadow-sm">
+                            <Bell size={20} className="text-zinc-600 dark:text-zinc-400"/>
+                            {notifications.length > 0 && <div className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full"></div>}
+                        </button>
+                     </div>
+                </header>
+                
+                {currentView === 'home' && (
+                    <main className="space-y-6">
+                        <div className="flex bg-white dark:bg-zinc-900 backdrop-blur-xl p-1.5 rounded-2xl border border-zinc-200 dark:border-white/5 shadow-xl max-w-md">
+                            <TabButton label="Active" icon={<Briefcase size={16} />} isActive={ledgerMode === 'active'} onClick={() => setLedgerMode('active')} color="rose" />
+                            <TabButton label="Passive" icon={<Building2 size={16} />} isActive={ledgerMode === 'passive'} onClick={() => setLedgerMode('passive')} color="cyan" />
+                            <TabButton label="Personal" icon={<UserCircle size={16} />} isActive={ledgerMode === 'personal'} onClick={() => setLedgerMode('personal')} color="violet" />
+                        </div>
+                        
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-2 space-y-6">
+                                <MetricsCard mode={ledgerMode} transactions={transactions} properties={properties} />
+                                {ledgerMode === 'passive' && (
+                                    <div className="animate-slide-up">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h2 className="font-bold text-zinc-900 dark:text-white">Properties</h2>
+                                            <button onClick={() => setIsPropertyModalOpen(true)} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold border transition-colors bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20 hover:bg-cyan-500/20"><Plus size={12} /> Add</button>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            {properties.map(p => <PropertyCard key={p.id} property={p} transactions={transactions} />)}
+                                        </div>
+                                    </div>
+                                )}
+                                {ledgerMode === 'personal' && <PersonalBudgetCard budgetData={calculatedBudgetData} onEdit={() => setIsBudgetModalOpen(true)} />}
+                            </div>
+                            
+                            <div className="lg:col-span-1">
+                                {ledgerMode !== 'personal' && (
+                                     <div className="bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/5 rounded-3xl p-4 h-full shadow-sm">
+                                        <div className="flex justify-between items-center mb-4 px-2">
+                                            <h2 className="font-bold text-zinc-900 dark:text-white text-sm">Recent Transactions</h2>
+                                            <button onClick={() => setIsStatementModalOpen(true)} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold border transition-colors bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-white/10 hover:bg-zinc-200 dark:hover:bg-zinc-700"><Upload size={12} /> Import</button>
+                                        </div>
+                                        <div className="space-y-1">
+                                            {transactions.filter(t => t.type === ledgerMode).slice(0, 8).map(tx => <TransactionItem key={tx.id} tx={tx} onEdit={() => setEditingTransaction(tx)} />)}
+                                            {transactions.filter(t => t.type === ledgerMode).length === 0 && (
+                                                <div className="text-center py-12 text-zinc-400 text-sm">
+                                                    No transactions found.
+                                                </div>
+                                            )}
+                                        </div>
+                                     </div>
+                                )}
+                            </div>
+                        </div>
+                    </main>
+                )}
+                {currentView === 'analytics' && <AnalyticsView mode={ledgerMode} transactions={transactions} />}
+                {currentView === 'expenses' && <ExpensesView transactions={transactions} properties={properties} onEditTransaction={(tx) => setEditingTransaction(tx)} />}
+                {currentView === 'mileage' && <MileageView logs={mileageLogs} onAddTrip={() => setIsMileageModalOpen(true)} />}
+                {currentView === 'invoices' && <InvoiceView invoices={invoices} onNewInvoice={() => setEditingInvoice('new')} onEditInvoice={(inv) => setEditingInvoice(inv)} />}
+                {currentView === 'profile' && <ProfileView profile={userProfile} onLogout={() => supabase.auth.signOut()} onUpdateProfile={handleUpdateProfile} onUploadAvatar={handleAvatarUpload} theme={theme} onToggleTheme={toggleTheme} transactions={transactions} />}
+             </div>
+        </div>
+
+        {isDrawerOpen && (
+          <QuickCaptureDrawer 
+            isOpen={true} 
+            onClose={() => setIsDrawerOpen(false)} 
+            onAddTransaction={handleAddTransaction} 
+            properties={properties} 
+            budgets={calculatedBudgetData} 
+          />
+        )}
+        {isPropertyModalOpen && (
+          <PropertyEditor 
+            isOpen={true} 
+            onClose={() => setIsPropertyModalOpen(false)} 
+            onSave={async (p) => { await supabase.from('properties').insert({...p, purchase_price:p.purchasePrice, current_value: p.currentValue, cca_class: p.ccaClass, opening_ucc: p.openingUcc, tenant_name: p.tenantName, lease_end: p.leaseEnd, mortgage_balance: p.mortgageBalance}); fetchInitialData(); }} 
+          />
+        )}
+        {isBudgetModalOpen && (
+          <BudgetEditor 
+            isOpen={true} 
+            onClose={() => setIsBudgetModalOpen(false)} 
+            budgetData={budgetSettings} 
+            onSave={handleSaveBudget} 
+          />
+        )}
+        {isMileageModalOpen && (
+          <MileageEditor 
+            isOpen={true} 
+            onClose={() => setIsMileageModalOpen(false)} 
+            onSave={async (log) => { await supabase.from('mileage_logs').insert(log); fetchInitialData(); }} 
+          />
+        )}
         <NotificationModal isOpen={isNotificationModalOpen} onClose={() => setIsNotificationModalOpen(false)} notifications={notifications} />
         <BankStatementUpload isOpen={isStatementModalOpen} onClose={() => setIsStatementModalOpen(false)} onImport={handleAddTransaction} properties={properties} currentMode={ledgerMode} />
-        <TransactionEditor isOpen={!!editingTransaction} onClose={() => setEditingTransaction(null)} transaction={editingTransaction} onSave={handleUpdateTransaction} onDelete={handleDeleteTransaction} properties={properties} />
-        <InvoiceEditor 
-            isOpen={!!editingInvoice} 
-            onClose={() => setEditingInvoice(null)} 
-            invoice={typeof editingInvoice === 'object' ? editingInvoice : null} 
-            onSave={handleSaveInvoice}
-            onDelete={handleDeleteInvoice}
-            profile={userProfile}
-        />
+        {editingTransaction && (
+          <TransactionEditor 
+            isOpen={true} 
+            onClose={() => setEditingTransaction(null)} 
+            transaction={editingTransaction} 
+            onSave={handleUpdateTransaction} 
+            onDelete={handleDeleteTransaction} 
+            properties={properties} 
+          />
+        )}
+        {editingInvoice && (
+          <InvoiceEditor 
+              isOpen={true} 
+              onClose={() => setEditingInvoice(null)} 
+              invoice={typeof editingInvoice === 'object' ? editingInvoice : null} 
+              onSave={handleSaveInvoice}
+              onDelete={handleDeleteInvoice}
+              profile={userProfile}
+          />
+        )}
 
-        <div className="fixed bottom-0 left-0 right-0 z-40 max-w-2xl mx-auto p-4">
-            <div className="bg-zinc-900/80 backdrop-blur-xl rounded-full flex items-center justify-around p-2 border border-white/10 shadow-2xl shadow-black/40">
+        {/* Mobile Bottom Nav */}
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 max-w-2xl mx-auto p-4">
+            <div className="bg-zinc-900 dark:bg-zinc-900/80 backdrop-blur-xl rounded-full flex items-center justify-around p-2 border border-zinc-200/20 dark:border-white/10 shadow-2xl transition-colors">
                 <NavButton icon={<LayoutDashboard size={24} />} label="Home" isActive={currentView === 'home'} onClick={() => setCurrentView('home')} />
                 <NavButton icon={<PieChart size={24} />} label="Analytics" isActive={currentView === 'analytics'} onClick={() => setCurrentView('analytics')} />
-                <NavButton icon={<Car size={24} />} label="Mileage" isActive={currentView === 'mileage'} onClick={() => setCurrentView('mileage')} />
+                <NavButton icon={<Search size={24} />} label="Expenses" isActive={currentView === 'expenses'} onClick={() => setCurrentView('expenses')} />
                 <div className="relative">
-                    <button onClick={() => setIsDrawerOpen(true)} className="w-16 h-12 bg-white rounded-full flex items-center justify-center text-black shadow-lg shadow-rose-500/20 -translate-y-4 ring-4 ring-zinc-900">
+                    <button onClick={() => setIsDrawerOpen(true)} className="w-16 h-12 bg-white rounded-full flex items-center justify-center text-black shadow-lg shadow-rose-500/20 -translate-y-4 ring-4 ring-zinc-50 dark:ring-zinc-900 transition-all">
                         <Plus size={28} />
                     </button>
                 </div>
@@ -337,7 +521,7 @@ export default function App() {
 
 const TabButton = ({ label, icon, isActive, onClick, color }: { label: string, icon: React.ReactNode, isActive: boolean, onClick: () => void, color: string }) => (
     <button onClick={onClick} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ${isActive ? `bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-md` : `text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white`}`}>
-        <span className={`${isActive ? `text-${color}-500` : ''}`}>{icon}</span>
+        <span className={`${isActive ? (color === 'rose' ? 'text-rose-500' : color === 'cyan' ? 'text-cyan-500' : 'text-violet-500') : ''}`}>{icon}</span>
         {label}
     </button>
 );
@@ -349,34 +533,39 @@ const NavButton = ({ label, icon, isActive, onClick }: { label: string, icon: Re
     </button>
 );
 
-// FIX: Refactored TransactionItem to use a named interface for props, resolving a TypeScript error with the 'key' prop.
+const SidebarLink = ({ label, icon, isActive, onClick }: { label: string, icon: React.ReactNode, isActive: boolean, onClick: () => void }) => (
+    <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${isActive ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-white/5' : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white border border-transparent'}`}>
+        <span className={isActive ? 'text-rose-500' : ''}>{icon}</span>
+        {label}
+    </button>
+);
+
 interface TransactionItemProps {
   tx: Transaction;
   onEdit: () => void;
 }
 
-// FIX: Changed component to be of type React.FC to fix typing error with the 'key' prop.
 const TransactionItem: React.FC<TransactionItemProps> = ({ tx, onEdit }) => {
     const isIncome = tx.amount > 0;
     return (
-        <div className="flex items-center gap-3 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 rounded-lg">
+        <div className="flex items-center gap-3 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 rounded-lg group transition-colors">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isIncome ? 'bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>
                 {isIncome ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />}
             </div>
             <div className="flex-1">
                 <div className="flex items-center gap-2">
                     <p className="font-semibold text-sm text-zinc-900 dark:text-white">{tx.vendor}</p>
-                    <button onClick={onEdit} className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-800 dark:hover:text-white transition-colors">
+                    <button onClick={onEdit} className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-800 dark:hover:text-white transition-colors opacity-0 group-hover:opacity-100">
                         <Edit2 size={12} />
                     </button>
                 </div>
                 <p className="text-xs text-zinc-500">{tx.category}</p>
             </div>
             <div className="text-right">
-                <p className={`font-bold text-sm ${isIncome ? 'text-emerald-500' : 'text-zinc-900 dark:text-white'}`}>
+                <p className={`font-bold text-sm ${isIncome ? 'text-emerald-600 dark:text-emerald-500' : 'text-zinc-900 dark:text-white'}`}>
                     {isIncome ? '+' : ''}${Math.abs(tx.amount).toLocaleString()}
                 </p>
-                <p className="text-xs text-zinc-400">{new Date(tx.date).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}</p>
+                <p className="text-[10px] text-zinc-400 uppercase">{new Date(tx.date).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}</p>
             </div>
         </div>
     );

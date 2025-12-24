@@ -1,6 +1,38 @@
 export type LedgerType = 'active' | 'passive' | 'personal';
 export type TaxForm = 't2125' | 't776';
 
+export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
+
+export interface Account {
+  id: string;
+  code: string; // e.g., "1000"
+  name: string; // e.g., "Cash in Bank"
+  type: AccountType;
+  tax_line_t2125?: string; // e.g., "8521" for Advertising
+  tax_line_t776?: string;
+  description?: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  date: string;
+  description: string;
+  reference_id?: string; // Link to original Receipt or Invoice ID
+  status: 'draft' | 'posted';
+  user_id: string;
+  created_at?: string;
+}
+
+export interface LedgerLine {
+  id: string;
+  journal_entry_id: string;
+  account_id: string; // References Account.id
+  account_code?: string; // stored for easier querying/display
+  account_name?: string; // stored for easier querying/display
+  debit: number;
+  credit: number;
+}
+
 export interface SplitDetail {
   amount: number;
   ledgerType: LedgerType;
@@ -94,6 +126,8 @@ export interface ChartDataPoint {
 }
 
 export interface BudgetCategory {
+  id?: string; // Database ID
+  tempId?: string; // Client-side ID for new items
   category: string;
   spent: number;
   limit: number;

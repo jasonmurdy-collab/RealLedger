@@ -31,7 +31,6 @@ export const PropertyEditor: React.FC<PropertyEditorProps> = ({ isOpen, onClose,
         ccaClass: 1, 
         openingUcc: parseFloat(openingUcc) || (parseFloat(purchasePrice) * 0.9), // Fallback logic
         additions: parseFloat(additions) || 0,
-        // FIX: Removed 'uccBalance' as it does not exist on the Property type.
         tenantName: tenantName || 'Vacant',
         leaseEnd: leaseEnd || '-',
         mortgageBalance: parseFloat(mortgageBalance) || 0,

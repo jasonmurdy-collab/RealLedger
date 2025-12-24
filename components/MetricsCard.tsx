@@ -10,12 +10,10 @@ interface MetricsCardProps {
 }
 
 export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, properties }) => {
-  // Filter transactions for the current mode
   const modeTransactions = useMemo(() => 
     transactions.filter(t => t.type === mode), 
   [transactions, mode]);
 
-  // Calculate Chart Data (Last 6 Months)
   const chartData = useMemo(() => {
     const today = new Date();
     const data = [];
@@ -28,16 +26,12 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, pr
         return tDate.getMonth() === d.getMonth() && tDate.getFullYear() === d.getFullYear();
       });
 
-      // For charts, we usually want positive representation of magnitude or specific net value
       let value = 0;
       if (mode === 'active') {
-        // Revenue (positive amounts)
         value = monthTx.reduce((acc, t) => t.amount > 0 ? acc + t.amount : acc, 0);
       } else if (mode === 'passive') {
-        // Net Income (Sum of all)
         value = monthTx.reduce((acc, t) => acc + t.amount, 0);
       } else {
-        // Personal Spend (absolute value of negative amounts)
         value = monthTx.reduce((acc, t) => t.amount < 0 ? acc + Math.abs(t.amount) : acc, 0);
       }
 
@@ -48,13 +42,10 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, pr
 
   let color, label1, val1, label2, val2, sub1, sub2;
 
-  // Calculate Summary Metrics
   if (mode === 'active') {
     color = '#f43f5e'; // rose-500
-    // Gross Commission Income (Sum of positive transactions)
     const gci = modeTransactions.reduce((acc, t) => t.amount > 0 ? acc + t.amount : acc, 0);
-    // Est Tax (Simplistic 20% of GCI)
-    const estTax = gci * 0.2; // roughly 20% effective tax rate
+    const estTax = gci * 0.2; 
 
     label1 = 'YTD GCI'; 
     val1 = `$${(gci / 1000).toFixed(1)}k`;
@@ -64,10 +55,7 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, pr
 
   } else if (mode === 'passive') {
     color = '#06b6d4'; // cyan-500
-    // Net Operating Income (Sum of all transactions)
     const noi = modeTransactions.reduce((acc, t) => acc + t.amount, 0);
-    // Estimated CCA claim based on 4% rate for Class 1 assets
-    // FIX: Property 'uccBalance' does not exist on type 'Property'. Changed to 'openingUcc'.
     const cca = properties.reduce((sum, p) => sum + (p.openingUcc * 0.04), 0);
 
     label1 = 'YTD Net Op Income'; 
@@ -103,17 +91,19 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, pr
     sub2 = 'Target: 20%';
   }
 
+  const gradientClass = mode === 'personal' ? 'from-violet-500/10' : mode === 'active' ? 'from-rose-500/10' : 'from-cyan-500/10';
+
   return (
     <div className="grid grid-cols-2 gap-4 mb-6">
-      {/* Metric 1 */}
-      <div className={`relative overflow-hidden rounded-2xl p-4 border border-white/5 bg-gradient-to-b from-${mode === 'personal' ? 'violet' : mode === 'active' ? 'rose' : 'cyan'}-900/20 to-zinc-900`}>
-        <p className="text-zinc-400 text-xs font-medium uppercase tracking-wider mb-1">
+      <div className={`relative overflow-hidden rounded-2xl p-4 border border-zinc-200 dark:border-white/5 bg-white dark:bg-zinc-900 shadow-sm`}>
+        <div className={`absolute inset-0 bg-gradient-to-b ${gradientClass} to-transparent opacity-50 pointer-events-none`}></div>
+        <p className="text-zinc-500 dark:text-zinc-400 text-[10px] font-black uppercase tracking-widest mb-1 relative z-10">
           {label1}
         </p>
-        <h3 className="text-2xl font-bold text-white mb-2">
+        <h3 className="text-2xl font-black text-zinc-900 dark:text-white mb-2 relative z-10">
           {val1}
         </h3>
-        <div className="h-10 w-full opacity-60">
+        <div className="h-10 w-full opacity-60 relative z-10">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData}>
               <defs>
@@ -126,7 +116,7 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, pr
                 type="monotone" 
                 dataKey="value" 
                 stroke={color} 
-                strokeWidth={2}
+                strokeWidth={3}
                 fillOpacity={1} 
                 fill={`url(#gradient-${mode})`} 
               />
@@ -135,21 +125,20 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, pr
         </div>
       </div>
 
-      {/* Metric 2 */}
-      <div className={`rounded-2xl p-4 border border-white/5 flex flex-col justify-between bg-zinc-900/50`}>
+      <div className={`rounded-2xl p-4 border border-zinc-200 dark:border-white/5 flex flex-col justify-between bg-white dark:bg-zinc-900 shadow-sm`}>
         <div>
-          <p className="text-zinc-400 text-xs font-medium uppercase tracking-wider mb-1">
+          <p className="text-zinc-500 dark:text-zinc-400 text-[10px] font-black uppercase tracking-widest mb-1">
             {label2}
           </p>
-          <h3 className="text-2xl font-bold text-white">
+          <h3 className="text-2xl font-black text-zinc-900 dark:text-white">
             {val2}
           </h3>
         </div>
         <div className="mt-2">
-           <span className={`text-xs px-2 py-1 rounded-full ${
-               mode === 'active' ? 'bg-rose-500/20 text-rose-300' : 
-               mode === 'passive' ? 'bg-cyan-500/20 text-cyan-300' : 
-               'bg-violet-500/20 text-violet-300'
+           <span className={`text-[10px] font-bold uppercase tracking-tight px-2 py-1 rounded-full ${
+               mode === 'active' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-300' : 
+               mode === 'passive' ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-300' : 
+               'bg-violet-500/10 text-violet-600 dark:text-violet-300'
            }`}>{sub2}</span>
         </div>
       </div>
