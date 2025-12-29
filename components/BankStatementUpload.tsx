@@ -62,8 +62,9 @@ export const BankStatementUpload: React.FC<BankStatementUploadProps> = ({ isOpen
         config: { responseMimeType: "application/json", responseSchema: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { date: { type: Type.STRING }, vendor: { type: Type.STRING }, amount: { type: Type.NUMBER }, description: { type: Type.STRING }, category_guess: { type: Type.STRING } }, required: ["date", "vendor", "amount", "category_guess"] } } }
       });
 
-      const rawData = JSON.parse(response.text.trim());
-      const drafted: DraftTransaction[] = rawData.map((item: any, idx: number) => ({ ...item, id: `draft-${idx}-${Date.now()}`, selected: true }));
+      // FIX: Add strong typing to parsed data to prevent type loss.
+      const rawData: Omit<DraftTransaction, 'id' | 'selected'>[] = JSON.parse(response.text.trim());
+      const drafted: DraftTransaction[] = rawData.map((item, idx: number) => ({ ...item, id: `draft-${idx}-${Date.now()}`, selected: true }));
       setDrafts(drafted);
       setStep('review');
     } catch (error) { console.error("Gemini Parsing Error:", error); alert("Failed to parse the statement."); } finally { setIsProcessing(false); }

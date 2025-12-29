@@ -79,7 +79,31 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
       onClose();
     } catch (error: any) {
       console.error("Failed to save budget:", error);
-      alert(`Failed to save budget: ${error.message || 'An unknown error occurred. Please check the console.'}`);
+      let errorMessage = "An unknown error occurred.";
+
+      if (typeof error === 'string') {
+        errorMessage = error;
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'object' && error !== null) {
+        // Handle Supabase/Postgrest error objects
+        if ('message' in error) {
+            errorMessage = error.message;
+        } else if ('error_description' in error) {
+            errorMessage = error.error_description;
+        } else if ('details' in error && typeof error.details === 'string') {
+            errorMessage = error.details;
+        } else {
+            // Fallback: JSON stringify to see the object content
+            try {
+                errorMessage = JSON.stringify(error);
+            } catch (e) {
+                errorMessage = "Error object could not be stringified.";
+            }
+        }
+      }
+      
+      alert(`Failed to save budget: ${errorMessage}`);
     } finally {
       setIsSaving(false);
     }

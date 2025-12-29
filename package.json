@@ -9,14 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "lucide-react": "^0.561.0",
-    "recharts": "^3.5.1",
-    "react": "^19.2.3",
+    "react": "18.3.1",
     "react-dom": "^19.2.3",
+    "react-router-dom": "6.22.3",
+    "react-router": "6.22.3",
+    "@remix-run/router": "1.15.3",
+    "lucide-react": "0.344.0",
+    "recharts": "2.12.2",
     "@supabase/supabase-js": "2",
     "@google/genai": "latest",
-    "jspdf": "^2.5.1",
-    "html2canvas": "^1.4.1"
+    "jspdf": "2.5.1",
+    "html2canvas": "1.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

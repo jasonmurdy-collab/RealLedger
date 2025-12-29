@@ -95,7 +95,8 @@ export interface DraftTransaction {
   date: string;
   vendor: string;
   amount: number;
-  description: string;
+  // FIX: Made description optional to align with Gemini response schema.
+  description?: string;
   category_guess: string;
   selected: boolean;
 }
