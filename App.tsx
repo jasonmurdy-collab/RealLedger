@@ -35,7 +35,7 @@ import { QuickCaptureDrawer } from './components/QuickCaptureDrawer';
 import { AuthScreen } from './components/AuthScreen';
 import { PropertyCard } from './components/PropertyCard'; 
 import { PropertyEditor } from './components/PropertyEditor';
-import { PersonalBudgetCard } from './components/PersonalBudgetCard';
+import { LedgerBudgetCard } from './components/PersonalBudgetCard';
 import { AnalyticsView } from './components/AnalyticsView';
 import { ExpensesView } from './components/ExpensesView';
 import { ProfileView } from './components/ProfileView';
@@ -72,6 +72,7 @@ export default function App() {
   
   // Modals
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
+  const [editingBudgetLedger, setEditingBudgetLedger] = useState<LedgerType>('personal');
   const [isPropertyModalOpen, setIsPropertyModalOpen] = useState(false);
   const [isMileageModalOpen, setIsMileageModalOpen] = useState(false);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
@@ -108,33 +109,53 @@ export default function App() {
             spent: 0, 
             limit: b.limit, 
             savingsGoal: b.savings_goal, 
-            user_id: b.user_id
+            user_id: b.user_id,
+            ledger_type: b.ledger_type
         })));
     }
   };
   
-  const calculatedBudgetData = useMemo(() => {
-      const currentMonth = new Date().getMonth();
-      const currentYear = new Date().getFullYear();
-      const spendingMap = new Map<string, number>();
-      
-      transactions
-        .filter(t => 
-            t.type === 'personal' && 
-            t.amount < 0 && 
-            new Date(t.date).getMonth() === currentMonth &&
-            new Date(t.date).getFullYear() === currentYear
-        )
-        .forEach(t => {
-            const cat = t.category;
-            const amt = Math.abs(t.amount);
-            spendingMap.set(cat, (spendingMap.get(cat) || 0) + amt);
-        });
+  const calculatedBudgetsByLedger = useMemo(() => {
+    const spendingMap: Record<LedgerType, Map<string, number>> = {
+      active: new Map(),
+      passive: new Map(),
+      personal: new Map(),
+    };
+    
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
 
-      return budgetSettings.map(b => ({
+    transactions
+      .filter(t => 
+          t.amount < 0 && 
+          new Date(t.date).getMonth() === currentMonth &&
+          new Date(t.date).getFullYear() === currentYear
+      )
+      .forEach(t => {
+          const ledgerMap = spendingMap[t.type];
+          const cat = t.category;
+          const amt = Math.abs(t.amount);
+          ledgerMap.set(cat, (ledgerMap.get(cat) || 0) + amt);
+      });
+
+    const result: Record<LedgerType, BudgetCategory[]> = {
+      active: [],
+      passive: [],
+      personal: [],
+    };
+    
+    budgetSettings.forEach(b => {
+      const ledgerResult = result[b.ledger_type];
+      if (ledgerResult) {
+        ledgerResult.push({
           ...b,
-          spent: spendingMap.get(b.category) || 0
-      }));
+          spent: spendingMap[b.ledger_type].get(b.category) || 0
+        });
+      }
+    });
+
+    return result;
+
   }, [transactions, budgetSettings]);
 
   useEffect(() => {
@@ -149,16 +170,16 @@ export default function App() {
       .filter(t => t.status === 'pending')
       .forEach(t => newNotifications.push({ id: `tx-${t.id}`, type: 'pending_tx', message: `Review: ${t.vendor} ($${Math.abs(t.amount)})`, date: new Date(t.date), relatedId: t.id }));
     
-    calculatedBudgetData
-      .filter(b => b.limit > 0 && b.spent > b.limit)
-      .forEach(b => newNotifications.push({ id: `budget-${b.category}`, type: 'budget_over', message: `Over Budget: ${b.category} (-$${(b.spent - b.limit).toFixed(0)})`, date: new Date(), relatedId: b.category }));
+    Object.values(calculatedBudgetsByLedger).flat()
+      .filter((b: BudgetCategory) => b.limit > 0 && b.spent > b.limit)
+      .forEach((b: BudgetCategory) => newNotifications.push({ id: `budget-${b.category}`, type: 'budget_over', message: `Over Budget: ${b.category} (-$${(b.spent - b.limit).toFixed(0)})`, date: new Date(), relatedId: b.category }));
       
     const currentMonth = new Date().getMonth();
     if ([2, 5, 8, 11].includes(currentMonth)) {
          newNotifications.push({ id: 'hst-remit', type: 'hst_remittance', message: 'Quarterly HST Remittance due soon.', date: new Date() });
     }
     setNotifications(newNotifications.sort((a, b) => b.date.getTime() - a.date.getTime()));
-  }, [transactions, calculatedBudgetData]);
+  }, [transactions, calculatedBudgetsByLedger]);
 
 
   const fetchInitialData = async () => {
@@ -199,50 +220,45 @@ export default function App() {
   const handleSaveBudget = async (newBudgets: BudgetCategory[]) => {
     if (!session?.user) return;
 
-    const originalBudgets = budgetSettings;
-    const originalBudgetMap = new Map(originalBudgets.map(b => [b.id, b]));
-    const newBudgetMap = new Map(newBudgets.filter(b => b.id).map(b => [b.id, b]));
-
-    const promises: Promise<any>[] = [];
-
-    // 1. Handle Deletions: If an ID from original map is not in new map, it was deleted.
-    for (const id of originalBudgetMap.keys()) {
-      if (typeof id === 'string' && !newBudgetMap.has(id)) {
-        promises.push(supabase.from('budget_categories').delete().eq('id', id));
-      }
-    }
-
-    // 2. Handle Additions and Updates
-    for (const newBudget of newBudgets) {
-      if (newBudget.id) {
-        const originalBudget = originalBudgetMap.get(newBudget.id) as BudgetCategory | undefined;
-        if (originalBudget && (originalBudget.category !== newBudget.category || originalBudget.limit !== newBudget.limit || originalBudget.savingsGoal !== newBudget.savingsGoal)) {
-          promises.push(
-            supabase
-              .from('budget_categories')
-              .update({ category: newBudget.category, limit: newBudget.limit, savings_goal: newBudget.savingsGoal ?? null })
-              .eq('id', newBudget.id)
-          );
-        }
-      } else {
-        promises.push(
-          supabase.from('budget_categories').insert({
-            category: newBudget.category,
-            limit: newBudget.limit,
-            savings_goal: newBudget.savingsGoal ?? null,
-            user_id: session.user.id,
-          })
-        );
-      }
-    }
+    const newAndExistingIds = new Set(newBudgets.map(b => b.id).filter(Boolean));
     
-    const results = await Promise.allSettled(promises);
-    results.forEach(result => {
-        if (result.status === 'rejected') {
-            console.error("A budget operation failed:", result.reason);
+    const originalIds = new Set(budgetSettings.map(b => b.id).filter(Boolean));
+    const idsToDelete: string[] = [];
+    originalIds.forEach(id => {
+        if (id && !newAndExistingIds.has(id)) {
+            idsToDelete.push(id);
         }
     });
-    
+
+    if (idsToDelete.length > 0) {
+        const { error: deleteError } = await supabase
+            .from('budget_categories')
+            .delete()
+            .in('id', idsToDelete);
+        
+        if (deleteError) {
+            console.error("Error deleting budget items:", deleteError);
+            throw deleteError;
+        }
+    }
+
+    const upsertPayload = newBudgets.map(b => ({
+      id: b.id,
+      category: b.category,
+      limit: b.limit,
+      savings_goal: b.savingsGoal ?? null,
+      user_id: session.user.id,
+      ledger_type: b.ledger_type,
+    }));
+
+    if (upsertPayload.length > 0) {
+        const { error: upsertError } = await supabase.from('budget_categories').upsert(upsertPayload, { onConflict: 'id' });
+        if (upsertError) {
+          console.error("Error saving budget:", upsertError);
+          throw upsertError;
+        }
+    }
+
     await fetchBudgets();
   };
 
@@ -250,10 +266,12 @@ export default function App() {
     const txsToInsert = Array.isArray(newTransactionData) ? newTransactionData : [newTransactionData];
     const dbReadyTxs = txsToInsert.map(tx => ({
         date: tx.date,
-        vendor: String(tx.vendor), 
+        // FIX: Cast to 'any' to handle potential 'unknown' type from dynamic sources.
+        vendor: String(tx.vendor as any), 
         amount: tx.amount,
         type: tx.type,
-        category: String(tx.category), 
+        // FIX: Cast to 'any' to handle potential 'unknown' type from dynamic sources.
+        category: String(tx.category as any), 
         tax_form: tx.taxForm,
         property_id: tx.propertyId,
         hst_included: tx.hstIncluded,
@@ -315,6 +333,11 @@ export default function App() {
     await handleUpdateProfile({ ...userProfile!, avatar_url: `${data.publicUrl}?t=${new Date().getTime()}` });
   };
   
+  const openBudgetEditor = (mode: LedgerType) => {
+      setEditingBudgetLedger(mode);
+      setIsBudgetModalOpen(true);
+  };
+
   if (!session) return <AuthScreen />;
   
   const bgGradient = theme === 'dark' ? 
@@ -403,6 +426,9 @@ export default function App() {
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div className="lg:col-span-2 space-y-6">
                                 <MetricsCard mode={ledgerMode} transactions={transactions} properties={properties} />
+                                
+                                <LedgerBudgetCard mode={ledgerMode} budgetData={calculatedBudgetsByLedger[ledgerMode]} onEdit={openBudgetEditor} />
+                                
                                 {ledgerMode === 'passive' && (
                                     <div className="animate-slide-up">
                                         <div className="flex justify-between items-center mb-4">
@@ -414,26 +440,23 @@ export default function App() {
                                         </div>
                                     </div>
                                 )}
-                                {ledgerMode === 'personal' && <PersonalBudgetCard budgetData={calculatedBudgetData} onEdit={() => setIsBudgetModalOpen(true)} />}
                             </div>
                             
                             <div className="lg:col-span-1">
-                                {ledgerMode !== 'personal' && (
-                                     <div className="bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/5 rounded-3xl p-4 h-full shadow-sm">
-                                        <div className="flex justify-between items-center mb-4 px-2">
-                                            <h2 className="font-bold text-zinc-900 dark:text-white text-sm">Recent Transactions</h2>
-                                            <button onClick={() => setIsStatementModalOpen(true)} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold border transition-colors bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-white/10 hover:bg-zinc-200 dark:hover:bg-zinc-700"><Upload size={12} /> Import</button>
-                                        </div>
-                                        <div className="space-y-1">
-                                            {transactions.filter(t => t.type === ledgerMode).slice(0, 8).map(tx => <TransactionItem key={tx.id} tx={tx} onEdit={() => setEditingTransaction(tx)} />)}
-                                            {transactions.filter(t => t.type === ledgerMode).length === 0 && (
-                                                <div className="text-center py-12 text-zinc-400 text-sm">
-                                                    No transactions found.
-                                                </div>
-                                            )}
-                                        </div>
-                                     </div>
-                                )}
+                                <div className="bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/5 rounded-3xl p-4 h-full shadow-sm">
+                                  <div className="flex justify-between items-center mb-4 px-2">
+                                      <h2 className="font-bold text-zinc-900 dark:text-white text-sm">Recent Transactions</h2>
+                                      <button onClick={() => setIsStatementModalOpen(true)} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold border transition-colors bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-white/10 hover:bg-zinc-200 dark:hover:bg-zinc-700"><Upload size={12} /> Import</button>
+                                  </div>
+                                  <div className="space-y-1">
+                                      {transactions.filter(t => t.type === ledgerMode).slice(0, 8).map(tx => <TransactionItem key={tx.id} tx={tx} onEdit={() => setEditingTransaction(tx)} />)}
+                                      {transactions.filter(t => t.type === ledgerMode).length === 0 && (
+                                          <div className="text-center py-12 text-zinc-400 text-sm">
+                                              No transactions found.
+                                          </div>
+                                      )}
+                                  </div>
+                                </div>
                             </div>
                         </div>
                     </main>
@@ -452,7 +475,7 @@ export default function App() {
             onClose={() => setIsDrawerOpen(false)} 
             onAddTransaction={handleAddTransaction} 
             properties={properties} 
-            budgets={calculatedBudgetData} 
+            budgets={budgetSettings} 
           />
         )}
         {isPropertyModalOpen && (
@@ -467,7 +490,8 @@ export default function App() {
             isOpen={true} 
             onClose={() => setIsBudgetModalOpen(false)} 
             budgetData={budgetSettings} 
-            onSave={handleSaveBudget} 
+            onSave={handleSaveBudget}
+            initialLedger={editingBudgetLedger}
           />
         )}
         {isMileageModalOpen && (
@@ -505,12 +529,13 @@ export default function App() {
             <div className="bg-zinc-900 dark:bg-zinc-900/80 backdrop-blur-xl rounded-full flex items-center justify-around p-2 border border-zinc-200/20 dark:border-white/10 shadow-2xl transition-colors">
                 <NavButton icon={<LayoutDashboard size={24} />} label="Home" isActive={currentView === 'home'} onClick={() => setCurrentView('home')} />
                 <NavButton icon={<PieChart size={24} />} label="Analytics" isActive={currentView === 'analytics'} onClick={() => setCurrentView('analytics')} />
-                <NavButton icon={<Search size={24} />} label="Expenses" isActive={currentView === 'expenses'} onClick={() => setCurrentView('expenses')} />
+                <NavButton icon={<Car size={24} />} label="Mileage" isActive={currentView === 'mileage'} onClick={() => setCurrentView('mileage')} />
                 <div className="relative">
                     <button onClick={() => setIsDrawerOpen(true)} className="w-16 h-12 bg-white rounded-full flex items-center justify-center text-black shadow-lg shadow-rose-500/20 -translate-y-4 ring-4 ring-zinc-50 dark:ring-zinc-900 transition-all">
                         <Plus size={28} />
                     </button>
                 </div>
+                <NavButton icon={<Search size={24} />} label="Expenses" isActive={currentView === 'expenses'} onClick={() => setCurrentView('expenses')} />
                 <NavButton icon={<InvoiceIcon size={24} />} label="Invoices" isActive={currentView === 'invoices'} onClick={() => setCurrentView('invoices')} />
                 <NavButton icon={<UserCircle size={24} />} label="Profile" isActive={currentView === 'profile'} onClick={() => setCurrentView('profile')} />
             </div>

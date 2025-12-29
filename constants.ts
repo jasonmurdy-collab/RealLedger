@@ -4,6 +4,10 @@ export const ONTARIO_HST_RATE = 0.13;
 
 export const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+export const PERSONAL_EXPENSE_CATEGORIES = [
+  'Housing', 'Groceries', 'Transportation', 'Entertainment', 'Shopping', 'Health & Wellness', 'Subscriptions', 'Personal Care'
+];
+
 // Phase 1.2: Chart of Accounts (COA) Seeding
 export const DEFAULT_CHART_OF_ACCOUNTS: Omit<Account, 'id'>[] = [
   // ASSETS (1000-1999)

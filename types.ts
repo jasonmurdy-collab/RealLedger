@@ -133,6 +133,7 @@ export interface BudgetCategory {
   limit: number;
   savingsGoal?: number; // For Goal-Oriented Budgeting
   user_id?: string; // Added for Supabase RLS
+  ledger_type: LedgerType; // Unified budgeting
 }
 
 // Updated Invoice and related types

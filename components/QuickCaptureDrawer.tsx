@@ -54,11 +54,17 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
   const [paymentMethod, setPaymentMethod] = useState<'credit_card' | 'bank' | 'cash'>('credit_card');
   const recognitionRef = useRef<any | null>(null);
 
+  const currentLedger = splitRatio === 100 ? 'active' : (splitRatio === 0 ? 'passive' : 'personal');
+
   // Budget Impact Calculation
   const budgetImpact = useMemo(() => {
     if (entryType === 'income' || !amount) return null;
     const numAmt = parseFloat(amount) || 0;
-    const targetBudget = budgets.find(b => b.category.toLowerCase() === category.toLowerCase());
+    
+    // Filter budgets for the currently implied ledger
+    const relevantBudgets = budgets.filter(b => b.ledger_type === currentLedger);
+    const targetBudget = relevantBudgets.find(b => b.category.toLowerCase() === category.toLowerCase());
+    
     if (!targetBudget) return null;
 
     const newTotal = targetBudget.spent + numAmt;
@@ -73,7 +79,7 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
         percentage,
         isOver
     };
-  }, [category, amount, budgets, entryType]);
+  }, [category, amount, budgets, entryType, currentLedger]);
 
   useEffect(() => {
     setCategory(entryType === 'expense' ? 'Supplies' : 'Commission');
