@@ -143,7 +143,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (session) fetchInitialData();
   }, [session]);
 
-  // Derived State: Budgets (Refined for exact matching and month-only tracking)
+  // Derived State: Budgets (Refined for exact matching and robust month-only tracking)
   const calculatedBudgetsByLedger = useMemo(() => {
     const spendingMap: Record<LedgerType, Map<string, number>> = {
       active: new Map(),
@@ -156,15 +156,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const currentYear = today.getFullYear();
 
     transactions.forEach(t => {
-        // Parse date reliably
-        const tDate = new Date(t.date + 'T00:00:00'); 
-        const tMonth = tDate.getMonth();
-        const tYear = tDate.getFullYear();
+        // Robust Date Parsing (split YYYY-MM-DD to avoid UTC day shifts)
+        const dateParts = t.date.split('-').map(Number);
+        const tYear = dateParts[0];
+        const tMonth = dateParts[1] - 1; // 0-indexed month
 
-        // Aggregation logic: Only expenses for the current month
+        // Aggregation logic: Only expenses for the current calendar month
         if (t.amount < 0 && tMonth === currentMonth && tYear === currentYear) {
             const map = spendingMap[t.type];
-            // Normalize for matching
+            // Normalize for matching: lowercase and trimmed
             const normalizedCat = (t.category || 'Uncategorized').toLowerCase().trim();
             map.set(normalizedCat, (map.get(normalizedCat) || 0) + Math.abs(t.amount));
         }
@@ -186,9 +186,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // CRUD Actions
   const updateTransaction = async (updatedTx: Transaction, updateAllFromVendor: boolean = true) => {
+    if (!session?.user) return;
     const hstAmount = updatedTx.hstIncluded ? Math.abs(updatedTx.amount) - (Math.abs(updatedTx.amount) / (1 + ONTARIO_HST_RATE)) : 0;
     
-    // Update the single transaction
+    // 1. Update the single transaction
     const { error: singleError } = await supabase.from('transactions').update({ 
         date: updatedTx.date, vendor: updatedTx.vendor, amount: updatedTx.amount, type: updatedTx.type, 
         category: updatedTx.category, tax_form: updatedTx.taxForm, property_id: updatedTx.propertyId, 
@@ -197,23 +198,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     if (singleError) throw singleError;
 
-    // Vendor Propagation Logic: 
-    // Update all other transactions with the same vendor name (case-insensitive) 
-    // to have the same category and type.
-    if (updateAllFromVendor) {
+    // 2. Vendor Propagation: Bulk update categorizations for this user/vendor
+    if (updateAllFromVendor && updatedTx.vendor) {
         const { error: bulkError } = await supabase.from('transactions')
             .update({ 
                 category: updatedTx.category, 
                 type: updatedTx.type,
                 tax_form: updatedTx.taxForm
             })
+            .eq('user_id', session.user.id)
             .ilike('vendor', updatedTx.vendor)
-            .neq('id', updatedTx.id); // Don't re-update the one we just did
+            .neq('id', updatedTx.id); 
         
-        if (bulkError) console.warn("Bulk vendor update had issues:", bulkError);
+        if (bulkError) console.warn("Vendor sync failed:", bulkError);
     }
     
-    // Refresh local state
     await fetchInitialData();
   };
 
@@ -271,7 +270,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     
     await fetchBudgets();
-    await fetchInitialData(); // Trigger full recalculation
+    await fetchInitialData(); 
   };
 
   const saveProperty = async (p: Omit<Property, 'id'>) => {

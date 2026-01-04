@@ -15,10 +15,11 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
   // Local state for odometer inputs
   const [startOdo, setStartOdo] = useState('');
   const [endOdo, setEndOdo] = useState('');
-  const [isUpdatingOdo, setIsUpdatingOdo] = useState(false);
+  const [isUpdatingStart, setIsUpdatingStart] = useState(false);
+  const [isUpdatingEnd, setIsUpdatingEnd] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Dynamic Year Range (CRA audit window is usually 6-7 years)
+  // Dynamic Year Range
   const availableYears = useMemo(() => {
     const currentYear = new Date().getFullYear();
     const years = [];
@@ -32,8 +33,8 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
   useEffect(() => {
     const stats = mileageAnnualStats.find(s => s.year === selectedYear);
     if (stats) {
-      setStartOdo(stats.start_odometer.toString());
-      setEndOdo(stats.end_odometer.toString());
+      setStartOdo(stats.start_odometer.toString() || '');
+      setEndOdo(stats.end_odometer.toString() || '');
     } else {
       setStartOdo('');
       setEndOdo('');
@@ -48,33 +49,35 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
 
   const totalBusinessKm = useMemo(() => yearLogs.reduce((acc, log) => acc + log.distance, 0), [yearLogs]);
   
-  const currentStats = mileageAnnualStats.find(s => s.year === selectedYear);
   const startVal = parseInt(startOdo) || 0;
   const endVal = parseInt(endOdo) || 0;
-  const totalDrivenKm = endVal - startVal;
+  const totalDrivenKm = Math.max(0, endVal - startVal);
   const isInvalidOdo = endVal > 0 && endVal < startVal;
   
   const businessPercentage = (totalDrivenKm > 0 && !isInvalidOdo) 
     ? Math.min(100, (totalBusinessKm / totalDrivenKm) * 100) 
     : 0;
   
-  const estimatedDeduction = totalBusinessKm * 0.70; // 2024 CRA rate
+  const estimatedDeduction = totalBusinessKm * 0.70; 
 
-  const handleSaveOdometer = async () => {
-    setIsUpdatingOdo(true);
-    setShowSuccess(false);
+  const handleSaveOdometer = async (type: 'start' | 'end') => {
+    if (type === 'start') setIsUpdatingStart(true);
+    else setIsUpdatingEnd(true);
+    
     try {
+      const stats = mileageAnnualStats.find(s => s.year === selectedYear);
       await saveAnnualMileageStats({
         year: selectedYear,
-        start_odometer: startVal,
-        end_odometer: endVal
+        start_odometer: type === 'start' ? startVal : (stats?.start_odometer || 0),
+        end_odometer: type === 'end' ? endVal : (stats?.end_odometer || 0)
       });
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (err) {
       alert("Failed to save odometer readings.");
     } finally {
-      setIsUpdatingOdo(false);
+      setIsUpdatingStart(false);
+      setIsUpdatingEnd(false);
     }
   };
 
@@ -164,43 +167,52 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
                 <Car size={18} className="text-rose-500" /> Fiscal Odometer Readings
             </h3>
             
-            <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Jan 1 Reading</label>
+            <div className="space-y-6">
+                <div className="space-y-3">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Jan 1 Reading (Start of Year)</label>
+                    <div className="flex gap-2">
                         <input 
                             type="number"
                             value={startOdo}
                             onChange={(e) => setStartOdo(e.target.value)}
                             placeholder="Starting KM"
-                            className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-white/10 rounded-2xl px-4 py-3 text-sm font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 transition-colors"
+                            className="flex-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-white/10 rounded-2xl px-4 py-3 text-sm font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 transition-colors"
                         />
+                        <button 
+                            onClick={() => handleSaveOdometer('start')}
+                            disabled={isUpdatingStart || !startOdo}
+                            className="px-4 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-2xl flex items-center justify-center hover:opacity-90 disabled:opacity-50 transition-all shadow-md"
+                        >
+                            {isUpdatingStart ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                        </button>
                     </div>
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Dec 31 Reading</label>
+                </div>
+
+                <div className="space-y-3">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Dec 31 Reading (End of Year)</label>
+                    <div className="flex gap-2">
                         <input 
                             type="number"
                             value={endOdo}
                             onChange={(e) => setEndOdo(e.target.value)}
                             placeholder="Ending KM"
-                            className={`w-full bg-zinc-50 dark:bg-zinc-800 border rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none transition-colors ${isInvalidOdo ? 'border-rose-500 text-rose-500' : 'border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-white focus:border-rose-500'}`}
+                            className={`flex-1 bg-zinc-50 dark:bg-zinc-800 border rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none transition-colors ${isInvalidOdo ? 'border-rose-500 text-rose-500' : 'border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-white focus:border-rose-500'}`}
                         />
+                        <button 
+                            onClick={() => handleSaveOdometer('end')}
+                            disabled={isUpdatingEnd || !endOdo || isInvalidOdo}
+                            className="px-4 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-2xl flex items-center justify-center hover:opacity-90 disabled:opacity-50 transition-all shadow-md"
+                        >
+                            {isUpdatingEnd ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                        </button>
                     </div>
                 </div>
 
-                <button 
-                    onClick={handleSaveOdometer}
-                    disabled={isUpdatingOdo || !startOdo || !endOdo || isInvalidOdo}
-                    className={`w-full py-4 font-black rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 disabled:opacity-50 ${showSuccess ? 'bg-emerald-500 text-white' : 'bg-zinc-900 dark:bg-white text-white dark:text-black hover:opacity-90'}`}
-                >
-                    {isUpdatingOdo ? (
-                      <Loader2 size={20} className="animate-spin" />
-                    ) : showSuccess ? (
-                      <><CheckCircle size={18} /> Year Logged Successfully</>
-                    ) : (
-                      <><Save size={18} /> Lock Odometer for {selectedYear}</>
-                    )}
-                </button>
+                {showSuccess && (
+                    <div className="flex items-center gap-2 text-emerald-500 font-black text-[10px] uppercase tracking-widest animate-pulse">
+                        <CheckCircle size={14} /> Fiscal Log Synced to Cloud
+                    </div>
+                )}
             </div>
         </div>
 

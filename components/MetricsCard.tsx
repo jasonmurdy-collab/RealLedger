@@ -20,10 +20,12 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, pr
     for (let i = 5; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
       const monthLabel = MONTH_NAMES[d.getMonth()];
+      const targetYear = d.getFullYear();
+      const targetMonth = d.getMonth();
       
       const monthTx = modeTransactions.filter(t => {
-        const tDate = new Date(t.date);
-        return tDate.getMonth() === d.getMonth() && tDate.getFullYear() === d.getFullYear();
+        const parts = t.date.split('-').map(Number);
+        return (parts[1] - 1) === targetMonth && parts[0] === targetYear;
       });
 
       let value = 0;
@@ -66,12 +68,13 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({ mode, transactions, pr
 
   } else {
     color = '#8b5cf6'; // violet-500
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
 
     const currentMonthTx = modeTransactions.filter(t => {
-      const d = new Date(t.date);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      const parts = t.date.split('-').map(Number);
+      return (parts[1] - 1) === currentMonth && parts[0] === currentYear;
     });
 
     const monthlySpend = currentMonthTx
