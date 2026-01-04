@@ -41,7 +41,7 @@ const AppContent: React.FC = () => {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/analytics" element={<AnalyticsView mode={ledgerMode} transactions={transactions} />} />
-          <Route path="/expenses" element={<ExpensesView transactions={transactions} properties={properties} onEditTransaction={setEditingTransaction} />} />
+          <Route path="/expenses" element={<ExpensesView transactions={transactions} properties={properties} budgets={budgetSettings} onEditTransaction={setEditingTransaction} />} />
           <Route path="/mileage" element={<MileageView logs={mileageLogs} onAddTrip={() => setIsMileageModalOpen(true)} />} />
           <Route path="/invoices" element={<InvoiceView invoices={invoices} onNewInvoice={() => setEditingInvoice('new')} onEditInvoice={setEditingInvoice} />} />
           <Route path="/profile" element={
@@ -79,6 +79,7 @@ const AppContent: React.FC = () => {
             onSave={updateTransaction} 
             onDelete={deleteTransaction} 
             properties={properties} 
+            budgets={budgetSettings}
           />
       )}
       {editingInvoice && (

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Transaction, Property, LedgerType } from '../types';
+import { Transaction, Property, LedgerType, BudgetCategory } from '../types';
 import { 
   Search, 
   Filter, 
@@ -12,20 +12,24 @@ import {
   ArrowRight, 
   Edit3,
   FileText,
-  AlertCircle
+  AlertCircle,
+  Link2,
+  Link2Off,
+  CheckCircle2
 } from 'lucide-react';
 import { MONTH_NAMES } from '../constants';
 
 interface ExpensesViewProps {
   transactions: Transaction[];
   properties: Property[];
+  budgets: BudgetCategory[];
   onEditTransaction: (tx: Transaction) => void;
 }
 
 type SortField = 'date' | 'amount' | 'vendor' | 'category';
 type SortOrder = 'asc' | 'desc';
 
-export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, properties, onEditTransaction }) => {
+export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, properties, budgets, onEditTransaction }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLedger, setSelectedLedger] = useState<LedgerType | 'all'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -75,6 +79,13 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
       setSortField(field);
       setSortOrder('desc');
     }
+  };
+
+  const isAggregated = (tx: Transaction) => {
+    return budgets.some(b => 
+        b.ledger_type === tx.type && 
+        b.category.toLowerCase() === tx.category.toLowerCase()
+    );
   };
 
   return (
@@ -152,7 +163,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
                       </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-white/5">
-                      {filteredExpenses.map(tx => (
+                      {filteredExpenses.map(tx => {
+                          const linked = isAggregated(tx);
+                          return (
                           <tr key={tx.id} className="group hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
                               <td className="p-4">
                                   <p className="text-xs font-bold text-zinc-900 dark:text-white">{new Date(tx.date).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
@@ -166,9 +179,21 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
                                   )}
                               </td>
                               <td className="p-4">
-                                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-md">
-                                      {tx.category}
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-md">
+                                          {tx.category}
+                                      </span>
+                                      {linked ? (
+                                          <CheckCircle2 size={12} className="text-emerald-500 opacity-60" />
+                                      ) : (
+                                          <div className="group/hint relative">
+                                              <Link2Off size={12} className="text-zinc-300 dark:text-zinc-600" />
+                                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-32 p-2 bg-zinc-900 text-[8px] text-white rounded shadow-xl opacity-0 group-hover/hint:opacity-100 pointer-events-none transition-opacity z-10 text-center font-bold">
+                                                  Not found in {tx.type} expense plan. Click edit to tag properly.
+                                              </div>
+                                          </div>
+                                      )}
+                                  </div>
                               </td>
                               <td className="p-4">
                                   <LedgerBadge type={tx.type} />
@@ -190,7 +215,8 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
                                   </button>
                               </td>
                           </tr>
-                      ))}
+                          )
+                      })}
                       {filteredExpenses.length === 0 && (
                           <tr>
                               <td colSpan={6} className="p-20 text-center">

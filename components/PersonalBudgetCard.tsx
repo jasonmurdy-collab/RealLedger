@@ -1,6 +1,6 @@
 import React from 'react';
 import { BudgetCategory, LedgerType } from '../types';
-import { Sparkles, Pencil, ArrowUpRight, TrendingDown, Target, Wallet, CheckCircle2, AlertCircle, Briefcase, Building2, UserCircle } from 'lucide-react';
+import { Sparkles, Pencil, ArrowUpRight, TrendingDown, Target, Wallet, CheckCircle2, AlertCircle, Briefcase, Building2, UserCircle, Plus } from 'lucide-react';
 import { MONTH_NAMES } from '../constants';
 
 interface LedgerBudgetCardProps {
@@ -18,7 +18,9 @@ export const LedgerBudgetCard: React.FC<LedgerBudgetCardProps> = ({ mode, budget
   const insight = overBudgetCategories.length > 0 
     ? `Heads up: Your ${overBudgetCategories[0].category} spending is $${(overBudgetCategories[0].spent - overBudgetCategories[0].limit).toFixed(0)} over your expected limit.` 
     : totalPlanned > 0 
-      ? `You're on track! You still have $${remaining.toLocaleString()} left in your planned expenses for this period.`
+      ? totalSpent > 0 
+        ? `You're on track! You still have $${remaining.toLocaleString()} left in your planned expenses for this period.`
+        : `No transactions matched your categories yet this month. Ensure your vendors are tagged correctly.`
       : `No expense plan is active for this ledger. Set one up to monitor your cash flow.`;
   
   const date = new Date();
@@ -137,7 +139,3 @@ export const LedgerBudgetCard: React.FC<LedgerBudgetCardProps> = ({ mode, budget
     </div>
   );
 };
-
-const Plus = ({ size }: { size: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-);

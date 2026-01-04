@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { BudgetCategory, LedgerType } from '../types';
-import { X, Plus, Save, Trash2, Sparkles, Target, Landmark, Briefcase, Building2, UserCircle } from 'lucide-react';
-import { GoogleGenAI, Type } from "@google/genai";
-import { PERSONAL_EXPENSE_CATEGORIES, DEFAULT_CHART_OF_ACCOUNTS } from '../constants';
+import { X, Plus, Save, Trash2, Briefcase, Building2, UserCircle } from 'lucide-react';
+import { DEFAULT_CHART_OF_ACCOUNTS } from '../constants';
 
 interface BudgetEditorProps {
   isOpen: boolean;
@@ -12,16 +11,11 @@ interface BudgetEditorProps {
   initialLedger: LedgerType;
 }
 
-const businessExpenseCategories = DEFAULT_CHART_OF_ACCOUNTS
-    .filter(acc => acc.type === 'Expense' && acc.tax_line_t2125)
-    .map(acc => acc.name);
-
 export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, budgetData, onSave, initialLedger }) => {
   const [localBudget, setLocalBudget] = useState<BudgetCategory[]>([]);
   const [activeLedger, setActiveLedger] = useState<LedgerType>(initialLedger);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [isSuggesting, setIsSuggesting] = useState(false);
 
   useEffect(() => {
     // Deep copy on open to prevent modifying parent state
@@ -32,10 +26,6 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
   const currentLedgerBudgets = useMemo(() => {
     return localBudget.filter(b => b.ledger_type === activeLedger);
   }, [localBudget, activeLedger]);
-
-  const totalPlanned = useMemo(() => {
-    return currentLedgerBudgets.reduce((sum, item) => sum + (item.limit || 0), 0);
-  }, [currentLedgerBudgets]);
 
   if (!isOpen) return null;
 
@@ -78,32 +68,10 @@ export const BudgetEditor: React.FC<BudgetEditorProps> = ({ isOpen, onClose, bud
       await onSave(localBudget);
       onClose();
     } catch (error: any) {
-      console.error("Failed to save budget:", error);
-      let errorMessage = "An unknown error occurred.";
-
-      if (typeof error === 'string') {
-        errorMessage = error;
-      } else if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'object' && error !== null) {
-        // Handle Supabase/Postgrest error objects
-        if ('message' in error) {
-            errorMessage = error.message;
-        } else if ('error_description' in error) {
-            errorMessage = error.error_description;
-        } else if ('details' in error && typeof error.details === 'string') {
-            errorMessage = error.details;
-        } else {
-            // Fallback: JSON stringify to see the object content
-            try {
-                errorMessage = JSON.stringify(error);
-            } catch (e) {
-                errorMessage = "Error object could not be stringified.";
-            }
-        }
-      }
-      
-      alert(`Failed to save budget: ${errorMessage}`);
+      console.error("Budget Save Error:", error);
+      // Fallback if error is somehow not an Error object
+      const msg = error instanceof Error ? error.message : String(error);
+      alert(`Failed to save budget:\n${msg}`);
     } finally {
       setIsSaving(false);
     }

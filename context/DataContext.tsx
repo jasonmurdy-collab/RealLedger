@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import { supabase } from '../supabaseClient';
 import { Session } from '@supabase/supabase-js';
-import { Transaction, BudgetCategory, Property, UserProfile, Notification, MileageLog, Invoice, LedgerType } from '../types';
+import { Transaction, BudgetCategory, Property, UserProfile, Notification, MileageLog, Invoice, LedgerType, MileageAnnualStats } from '../types';
 import { ONTARIO_HST_RATE } from '../constants';
 
 interface DataContextType {
@@ -17,6 +17,7 @@ interface DataContextType {
   properties: Property[];
   userProfile: UserProfile | null;
   mileageLogs: MileageLog[];
+  mileageAnnualStats: MileageAnnualStats[];
   notifications: Notification[];
   invoices: Invoice[];
   calculatedBudgetsByLedger: Record<LedgerType, BudgetCategory[]>;
@@ -24,11 +25,12 @@ interface DataContextType {
   // Actions
   refreshData: () => Promise<void>;
   addTransaction: (tx: Omit<Transaction, 'id' | 'status'> | Omit<Transaction, 'id' | 'status'>[]) => Promise<void>;
-  updateTransaction: (tx: Transaction) => Promise<void>;
+  updateTransaction: (tx: Transaction, updateAllFromVendor?: boolean) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
   saveBudget: (budgets: BudgetCategory[]) => Promise<void>;
   saveProperty: (prop: Omit<Property, 'id'>) => Promise<void>;
   saveMileage: (log: Omit<MileageLog, 'id'>) => Promise<void>;
+  saveAnnualMileageStats: (stats: Omit<MileageAnnualStats, 'id'>) => Promise<void>;
   saveInvoice: (inv: Omit<Invoice, 'id'> | Invoice) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
   updateProfile: (profile: UserProfile) => Promise<void>;
@@ -59,6 +61,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [properties, setProperties] = useState<Property[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [mileageLogs, setMileageLogs] = useState<MileageLog[]>([]);
+  const [mileageAnnualStats, setMileageAnnualStats] = useState<MileageAnnualStats[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
 
@@ -86,7 +89,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Fetch Data
   const fetchBudgets = async () => {
     if (!session?.user) return;
-    const { data } = await supabase.from('budget_categories').select('*');
+    const { data, error } = await supabase.from('budget_categories').select('*');
+    if (error) throw error;
     if (data) {
         setBudgetSettings(data.map((b: any) => ({
             id: b.id,
@@ -104,11 +108,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!session?.user) return;
     const { user } = session;
 
-    const [txRes, propRes, profRes, mileRes, invRes] = await Promise.all([
+    const [txRes, propRes, profRes, mileRes, mileStatsRes, invRes] = await Promise.all([
         supabase.from('transactions').select('*').order('date', { ascending: false }),
         supabase.from('properties').select('*'),
         supabase.from('profiles').select('*').eq('id', user.id).single(),
         supabase.from('mileage_logs').select('*').order('date', { ascending: false }),
+        supabase.from('mileage_annual_stats').select('*'),
         supabase.from('invoices').select('*').order('invoice_date', { ascending: false }),
     ]);
     
@@ -124,10 +129,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (propRes.data) {
         setProperties(propRes.data.map((p: any) => ({
             id: p.id, address: p.address, purchasePrice: p.purchase_price, currentValue: p.current_value, ccaClass: p.cca_class,
-            openingUcc: p.opening_ucc, additions: p.additions, tenantName: p.tenant_name, leaseEnd: p.lease_end, user_id: p.user_id, mortgageBalance: p.mortgage_balance
+            openingUcc: p.opening_ucc, additions: p.additions, tenantName: p.tenant_name, lease_end: p.lease_end, user_id: p.user_id, mortgageBalance: p.mortgage_balance
         })));
     }
     if (mileRes.data) setMileageLogs(mileRes.data);
+    if (mileStatsRes.data) setMileageAnnualStats(mileStatsRes.data);
     if (profRes.data) setUserProfile(profRes.data);
     else setUserProfile({ id: user.id, full_name: '', role: 'Real Estate Professional', avatar_url: '' });
     if (invRes.data) setInvoices(invRes.data);
@@ -137,7 +143,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (session) fetchInitialData();
   }, [session]);
 
-  // Derived State: Budgets
+  // Derived State: Budgets (Refined for exact matching and month-only tracking)
   const calculatedBudgetsByLedger = useMemo(() => {
     const spendingMap: Record<LedgerType, Map<string, number>> = {
       active: new Map(),
@@ -145,33 +151,72 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       personal: new Map(),
     };
     
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
 
-    transactions.filter(t => t.amount < 0 && new Date(t.date).getMonth() === currentMonth && new Date(t.date).getFullYear() === currentYear)
-      .forEach(t => {
-          const map = spendingMap[t.type];
-          map.set(t.category, (map.get(t.category) || 0) + Math.abs(t.amount));
-      });
+    transactions.forEach(t => {
+        // Parse date reliably
+        const tDate = new Date(t.date + 'T00:00:00'); 
+        const tMonth = tDate.getMonth();
+        const tYear = tDate.getFullYear();
+
+        // Aggregation logic: Only expenses for the current month
+        if (t.amount < 0 && tMonth === currentMonth && tYear === currentYear) {
+            const map = spendingMap[t.type];
+            // Normalize for matching
+            const normalizedCat = (t.category || 'Uncategorized').toLowerCase().trim();
+            map.set(normalizedCat, (map.get(normalizedCat) || 0) + Math.abs(t.amount));
+        }
+    });
 
     const result: Record<LedgerType, BudgetCategory[]> = { active: [], passive: [], personal: [] };
+    
     budgetSettings.forEach(b => {
       const list = result[b.ledger_type];
-      if (list) list.push({ ...b, spent: spendingMap[b.ledger_type].get(b.category) || 0 });
+      if (list) {
+          const normalizedPlanCat = b.category.toLowerCase().trim();
+          const actualSpent = spendingMap[b.ledger_type].get(normalizedPlanCat) || 0;
+          list.push({ ...b, spent: actualSpent });
+      }
     });
+    
     return result;
   }, [transactions, budgetSettings]);
 
-  // Derived State: Notifications
-  useEffect(() => {
-    const newNotifications: Notification[] = [];
-    transactions.filter(t => t.status === 'pending').forEach(t => newNotifications.push({ id: `tx-${t.id}`, type: 'pending_tx', message: `Review: ${t.vendor} ($${Math.abs(t.amount)})`, date: new Date(t.date), relatedId: t.id }));
-    (Object.values(calculatedBudgetsByLedger).flat() as BudgetCategory[]).filter(b => b.limit > 0 && b.spent > b.limit).forEach(b => newNotifications.push({ id: `budget-${b.category}`, type: 'budget_over', message: `Over Budget: ${b.category} (-$${(b.spent - b.limit).toFixed(0)})`, date: new Date(), relatedId: b.category }));
-    if ([2, 5, 8, 11].includes(new Date().getMonth())) newNotifications.push({ id: 'hst-remit', type: 'hst_remittance', message: 'Quarterly HST Remittance due soon.', date: new Date() });
-    setNotifications(newNotifications.sort((a, b) => b.date.getTime() - a.date.getTime()));
-  }, [transactions, calculatedBudgetsByLedger]);
-
   // CRUD Actions
+  const updateTransaction = async (updatedTx: Transaction, updateAllFromVendor: boolean = true) => {
+    const hstAmount = updatedTx.hstIncluded ? Math.abs(updatedTx.amount) - (Math.abs(updatedTx.amount) / (1 + ONTARIO_HST_RATE)) : 0;
+    
+    // Update the single transaction
+    const { error: singleError } = await supabase.from('transactions').update({ 
+        date: updatedTx.date, vendor: updatedTx.vendor, amount: updatedTx.amount, type: updatedTx.type, 
+        category: updatedTx.category, tax_form: updatedTx.taxForm, property_id: updatedTx.propertyId, 
+        hst_included: updatedTx.hstIncluded, hst_amount: hstAmount 
+    }).eq('id', updatedTx.id);
+    
+    if (singleError) throw singleError;
+
+    // Vendor Propagation Logic: 
+    // Update all other transactions with the same vendor name (case-insensitive) 
+    // to have the same category and type.
+    if (updateAllFromVendor) {
+        const { error: bulkError } = await supabase.from('transactions')
+            .update({ 
+                category: updatedTx.category, 
+                type: updatedTx.type,
+                tax_form: updatedTx.taxForm
+            })
+            .ilike('vendor', updatedTx.vendor)
+            .neq('id', updatedTx.id); // Don't re-update the one we just did
+        
+        if (bulkError) console.warn("Bulk vendor update had issues:", bulkError);
+    }
+    
+    // Refresh local state
+    await fetchInitialData();
+  };
+
   const addTransaction = async (newTransactionData: Omit<Transaction, 'id' | 'status'> | Omit<Transaction, 'id' | 'status'>[]) => {
     if (!session?.user) throw new Error("User not authenticated");
     const txsToInsert = Array.isArray(newTransactionData) ? newTransactionData : [newTransactionData];
@@ -185,17 +230,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await fetchInitialData();
   };
 
-  const updateTransaction = async (updatedTx: Transaction) => {
-    const hstAmount = updatedTx.hstIncluded ? Math.abs(updatedTx.amount) - (Math.abs(updatedTx.amount) / (1 + ONTARIO_HST_RATE)) : 0;
-    const { error } = await supabase.from('transactions').update({ 
-        date: updatedTx.date, vendor: updatedTx.vendor, amount: updatedTx.amount, type: updatedTx.type, 
-        category: updatedTx.category, tax_form: updatedTx.taxForm, property_id: updatedTx.propertyId, 
-        hst_included: updatedTx.hstIncluded, hst_amount: hstAmount 
-    }).eq('id', updatedTx.id);
-    if (error) throw error;
-    setTransactions(prev => prev.map(t => t.id === updatedTx.id ? { ...updatedTx, hstAmount } : t));
-  };
-
   const deleteTransaction = async (id: string) => {
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (error) throw error;
@@ -203,35 +237,41 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const saveBudget = async (newBudgets: BudgetCategory[]) => {
-    if (!session?.user) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) throw new Error("You must be logged in to save budgets.");
     const userId = session.user.id;
-    const newIds = new Set(newBudgets.map(b => b.id).filter((id): id is string => !!id));
-    const originalIds = new Set(budgetSettings.map(b => b.id).filter((id): id is string => !!id));
-    const idsToDelete = [...originalIds].filter(id => !newIds.has(id));
+    
+    const incomingIds = new Set<string>(newBudgets.map(b => b.id).filter((id): id is string => !!id));
+    const currentIds = new Set<string>(budgetSettings.map(b => b.id).filter((id): id is string => !!id));
+    const idsToDelete = [...currentIds].filter(id => !incomingIds.has(id));
 
     if (idsToDelete.length > 0) {
-        const { error: deleteError } = await supabase.from('budget_categories').delete().in('id', idsToDelete as string[]);
-        if (deleteError) throw deleteError;
+        const { error: deleteError } = await supabase.from('budget_categories').delete().in('id', idsToDelete);
+        if (deleteError) throw new Error(`Failed to delete removed categories: ${deleteError.message}`);
     }
 
-    const upsertPayload = newBudgets.map(b => {
-      // Explicitly construct object to avoid undefined 'id' which can cause issues with Supabase types/upsert logic
-      const payload: any = {
-        category: b.category, 
-        limit: b.limit, 
-        savings_goal: b.savingsGoal ?? null,
-        user_id: userId, 
-        ledger_type: b.ledger_type,
-      };
-      if (b.id) payload.id = b.id;
-      return payload;
-    });
+    const updates = newBudgets.filter(b => !!b.id).map(b => ({
+        id: b.id, category: b.category, limit: b.limit, savings_goal: b.savingsGoal ?? null,
+        user_id: userId, ledger_type: b.ledger_type || 'active', 
+    }));
 
-    if (upsertPayload.length > 0) {
-        const { error } = await supabase.from('budget_categories').upsert(upsertPayload, { onConflict: 'id' });
-        if (error) throw error;
+    const inserts = newBudgets.filter(b => !b.id).map(b => ({
+        category: b.category, limit: b.limit, savings_goal: b.savingsGoal ?? null,
+        user_id: userId, ledger_type: b.ledger_type || 'active', 
+    }));
+
+    if (updates.length > 0) {
+        const { error: updateError } = await supabase.from('budget_categories').upsert(updates);
+        if (updateError) throw new Error(`Failed to update categories: ${updateError.message}`);
     }
+
+    if (inserts.length > 0) {
+        const { error: insertError } = await supabase.from('budget_categories').insert(inserts);
+        if (insertError) throw new Error(`Failed to create new categories: ${insertError.message}`);
+    }
+    
     await fetchBudgets();
+    await fetchInitialData(); // Trigger full recalculation
   };
 
   const saveProperty = async (p: Omit<Property, 'id'>) => {
@@ -245,6 +285,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const saveMileage = async (log: Omit<MileageLog, 'id'>) => {
     const { error } = await supabase.from('mileage_logs').insert({...log, user_id: session?.user.id});
+    if (error) throw error;
+    await fetchInitialData();
+  };
+
+  const saveAnnualMileageStats = async (stats: Omit<MileageAnnualStats, 'id'>) => {
+    const { error } = await supabase.from('mileage_annual_stats').upsert({
+      ...stats,
+      user_id: session?.user.id
+    }, { onConflict: 'user_id,year' });
     if (error) throw error;
     await fetchInitialData();
   };
@@ -285,9 +334,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   return (
     <DataContext.Provider value={{
       session, ledgerMode, setLedgerMode, theme, toggleTheme,
-      transactions, budgetSettings, properties, userProfile, mileageLogs, notifications, invoices, calculatedBudgetsByLedger,
+      transactions, budgetSettings, properties, userProfile, mileageLogs, mileageAnnualStats, notifications, invoices, calculatedBudgetsByLedger,
       refreshData: fetchInitialData, addTransaction, updateTransaction, deleteTransaction,
-      saveBudget, saveProperty, saveMileage, saveInvoice, deleteInvoice, updateProfile, uploadAvatar, logout,
+      saveBudget, saveProperty, saveMileage, saveAnnualMileageStats, saveInvoice, deleteInvoice, updateProfile, uploadAvatar, logout,
       isDrawerOpen, setIsDrawerOpen, editingTransaction, setEditingTransaction,
       isStatementModalOpen, setIsStatementModalOpen, isNotificationModalOpen, setIsNotificationModalOpen
     }}>

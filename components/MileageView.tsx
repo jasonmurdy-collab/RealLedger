@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
-import { Car, MapPin, Plus, TrendingUp } from 'lucide-react';
-import { MileageLog } from '../types';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Car, MapPin, Plus, TrendingUp, Calendar, Gauge, Save, Loader2, Info, AlertCircle, CheckCircle } from 'lucide-react';
+import { MileageLog, MileageAnnualStats } from '../types';
+import { useData } from '../context/DataContext';
 
 interface MileageViewProps {
   logs: MileageLog[];
@@ -8,69 +9,232 @@ interface MileageViewProps {
 }
 
 export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => {
-  const totalKm = useMemo(() => logs.reduce((acc, log) => acc + log.distance, 0), [logs]);
-  const estimatedDeduction = totalKm * 0.68; // Using 2024 CRA rate for first 5000 km
+  const { mileageAnnualStats, saveAnnualMileageStats } = useData();
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  
+  // Local state for odometer inputs
+  const [startOdo, setStartOdo] = useState('');
+  const [endOdo, setEndOdo] = useState('');
+  const [isUpdatingOdo, setIsUpdatingOdo] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // Dynamic Year Range (CRA audit window is usually 6-7 years)
+  const availableYears = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let i = currentYear + 1; i >= currentYear - 4; i--) {
+      years.push(i);
+    }
+    return years;
+  }, []);
+
+  // Sync inputs with stored stats when year changes
+  useEffect(() => {
+    const stats = mileageAnnualStats.find(s => s.year === selectedYear);
+    if (stats) {
+      setStartOdo(stats.start_odometer.toString());
+      setEndOdo(stats.end_odometer.toString());
+    } else {
+      setStartOdo('');
+      setEndOdo('');
+    }
+    setShowSuccess(false);
+  }, [selectedYear, mileageAnnualStats]);
+
+  // Filter logs by year
+  const yearLogs = useMemo(() => {
+    return logs.filter(log => new Date(log.date).getFullYear() === selectedYear);
+  }, [logs, selectedYear]);
+
+  const totalBusinessKm = useMemo(() => yearLogs.reduce((acc, log) => acc + log.distance, 0), [yearLogs]);
+  
+  const currentStats = mileageAnnualStats.find(s => s.year === selectedYear);
+  const startVal = parseInt(startOdo) || 0;
+  const endVal = parseInt(endOdo) || 0;
+  const totalDrivenKm = endVal - startVal;
+  const isInvalidOdo = endVal > 0 && endVal < startVal;
+  
+  const businessPercentage = (totalDrivenKm > 0 && !isInvalidOdo) 
+    ? Math.min(100, (totalBusinessKm / totalDrivenKm) * 100) 
+    : 0;
+  
+  const estimatedDeduction = totalBusinessKm * 0.70; // 2024 CRA rate
+
+  const handleSaveOdometer = async () => {
+    setIsUpdatingOdo(true);
+    setShowSuccess(false);
+    try {
+      await saveAnnualMileageStats({
+        year: selectedYear,
+        start_odometer: startVal,
+        end_odometer: endVal
+      });
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    } catch (err) {
+      alert("Failed to save odometer readings.");
+    } finally {
+      setIsUpdatingOdo(false);
+    }
+  };
 
   return (
-    <div className="space-y-6 animate-slide-up">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-zinc-900 border border-white/5 rounded-2xl p-4">
-           <div className="flex items-center gap-2 mb-2">
-              <div className="p-1.5 rounded-lg bg-rose-500/10 text-rose-500">
-                <Car size={16} />
-              </div>
-              <span className="text-xs text-zinc-400 font-medium">Total Distance</span>
-           </div>
-           <p className="text-2xl font-bold text-white">{totalKm.toLocaleString()} km</p>
-           <p className="text-xs text-zinc-500 mt-1">For Tax Year 2024</p>
+    <div className="space-y-6 animate-slide-up pb-24">
+      {/* Year Selector and Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-200 dark:border-white/5 shadow-sm">
+        <div>
+          <h2 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tight">CRA Compliance Tracker</h2>
+          <p className="text-xs text-zinc-500 font-medium">Tracking for Tax Form T2125 / T776</p>
         </div>
-        <div className="bg-zinc-900 border border-white/5 rounded-2xl p-4">
-           <div className="flex items-center gap-2 mb-2">
-              <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
-                <TrendingUp size={16} />
-              </div>
-              <span className="text-xs text-zinc-400 font-medium">Est. Deduction</span>
-           </div>
-           <p className="text-2xl font-bold text-emerald-400">${estimatedDeduction.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-           <p className="text-xs text-zinc-500 mt-1">@ $0.68/km</p>
+        <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl w-full sm:w-auto">
+            <Calendar size={14} className="ml-3 text-zinc-400" />
+            <select 
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+              className="bg-transparent text-sm font-black uppercase tracking-widest text-zinc-900 dark:text-white py-2 pl-1 pr-8 outline-none cursor-pointer"
+            >
+              {availableYears.map(y => (
+                <option key={y} value={y} className="bg-white dark:bg-zinc-900">
+                  {y} {y === new Date().getFullYear() ? '(Current)' : 'Fiscal Year'}
+                </option>
+              ))}
+            </select>
         </div>
       </div>
 
-      {/* Trip Log */}
-      <div className="bg-zinc-900 border border-white/5 rounded-3xl p-6">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="font-bold text-white text-lg">
-            Mileage Log
-          </h3>
-          <button onClick={onAddTrip} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors hover:bg-white/5 bg-rose-500/10 text-rose-400 border-rose-500/20">
-             <Plus size={12} /> Log Trip
-          </button>
+      {/* Proportional Utilization Gauge */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-3xl p-6 shadow-sm relative overflow-hidden">
+             <div className="flex justify-between items-start relative z-10">
+                <div>
+                   <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Business Utilization Rate</p>
+                   <h3 className={`text-4xl font-black tracking-tighter ${businessPercentage > 0 ? 'text-zinc-900 dark:text-white' : 'text-zinc-300 dark:text-zinc-700'}`}>
+                    {businessPercentage.toFixed(1)}%
+                   </h3>
+                </div>
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${businessPercentage > 0 ? 'bg-rose-500/10 text-rose-500' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'}`}>
+                    <Gauge size={24} />
+                </div>
+             </div>
+             
+             <div className="mt-8 relative z-10">
+                <div className="flex justify-between text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
+                    <span>Business Use: {totalBusinessKm.toLocaleString()} KM</span>
+                    <span className={isInvalidOdo ? 'text-rose-500 flex items-center gap-1' : ''}>
+                      {isInvalidOdo && <AlertCircle size={10} />}
+                      Total Driven: {totalDrivenKm > 0 ? totalDrivenKm.toLocaleString() : 0} KM
+                    </span>
+                </div>
+                <div className="h-4 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden border border-zinc-200 dark:border-white/5 shadow-inner">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-1000 ease-out ${isInvalidOdo ? 'bg-rose-500/30' : 'bg-rose-500'}`} 
+                      style={{ width: `${businessPercentage}%` }} 
+                    />
+                </div>
+             </div>
+
+             <div className="mt-6 flex items-start gap-3 p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-white/5">
+                <Info size={16} className="text-zinc-400 mt-0.5 shrink-0" />
+                <p className="text-[10px] text-zinc-500 font-bold leading-relaxed uppercase tracking-tight">
+                    CRA requires your total kilometers driven for the year to calculate the percentage of vehicle expenses you can deduct. {isInvalidOdo && <span className="text-rose-500 font-black">Warning: End odometer must be greater than start.</span>}
+                </p>
+             </div>
+          </div>
+
+          <div className="bg-zinc-900 dark:bg-zinc-800 text-white rounded-3xl p-6 shadow-xl flex flex-col justify-between relative overflow-hidden">
+             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2"></div>
+             <div>
+                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Est. Tax Savings ({selectedYear})</p>
+                <h3 className="text-3xl font-black text-emerald-400 tracking-tighter">
+                  ${estimatedDeduction.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </h3>
+             </div>
+             <div className="mt-4">
+                <div className="px-3 py-1 bg-emerald-500/10 text-emerald-400 text-[10px] font-black rounded-lg inline-flex items-center gap-1.5 uppercase tracking-widest">
+                    <TrendingUp size={12} /> $0.70 / KM Rate
+                </div>
+             </div>
+          </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Odometer Input Card */}
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-3xl p-6 shadow-sm">
+            <h3 className="font-black text-zinc-900 dark:text-white uppercase tracking-tighter mb-6 flex items-center gap-2">
+                <Car size={18} className="text-rose-500" /> Fiscal Odometer Readings
+            </h3>
+            
+            <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Jan 1 Reading</label>
+                        <input 
+                            type="number"
+                            value={startOdo}
+                            onChange={(e) => setStartOdo(e.target.value)}
+                            placeholder="Starting KM"
+                            className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-white/10 rounded-2xl px-4 py-3 text-sm font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-rose-500 transition-colors"
+                        />
+                    </div>
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Dec 31 Reading</label>
+                        <input 
+                            type="number"
+                            value={endOdo}
+                            onChange={(e) => setEndOdo(e.target.value)}
+                            placeholder="Ending KM"
+                            className={`w-full bg-zinc-50 dark:bg-zinc-800 border rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none transition-colors ${isInvalidOdo ? 'border-rose-500 text-rose-500' : 'border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-white focus:border-rose-500'}`}
+                        />
+                    </div>
+                </div>
+
+                <button 
+                    onClick={handleSaveOdometer}
+                    disabled={isUpdatingOdo || !startOdo || !endOdo || isInvalidOdo}
+                    className={`w-full py-4 font-black rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 disabled:opacity-50 ${showSuccess ? 'bg-emerald-500 text-white' : 'bg-zinc-900 dark:bg-white text-white dark:text-black hover:opacity-90'}`}
+                >
+                    {isUpdatingOdo ? (
+                      <Loader2 size={20} className="animate-spin" />
+                    ) : showSuccess ? (
+                      <><CheckCircle size={18} /> Year Logged Successfully</>
+                    ) : (
+                      <><Save size={18} /> Lock Odometer for {selectedYear}</>
+                    )}
+                </button>
+            </div>
         </div>
-        
-        <div className="space-y-3">
-            {logs.length > 0 ? logs.map((log) => (
-                <div key={log.id} className="p-4 rounded-xl bg-zinc-800/50 border border-white/5">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <p className="font-semibold text-white mb-1">{log.purpose}</p>
-                            <div className="flex items-center gap-2 text-xs text-zinc-400">
-                                <MapPin size={12} />
+
+        {/* Trip Log List */}
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-3xl p-6 shadow-sm">
+            <div className="flex justify-between items-center mb-6">
+                <h3 className="font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Business Trip Log</h3>
+                <button onClick={onAddTrip} className="px-4 py-2 bg-rose-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg shadow-rose-500/20 active:scale-95 transition-all flex items-center gap-1.5">
+                    <Plus size={14} /> Log Trip
+                </button>
+            </div>
+            
+            <div className="space-y-3 max-h-[400px] overflow-y-auto hide-scrollbar">
+                {yearLogs.length > 0 ? yearLogs.map((log) => (
+                    <div key={log.id} className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/30 border border-zinc-200 dark:border-white/5 flex justify-between items-center group hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all">
+                        <div className="space-y-1">
+                            <p className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">{log.purpose}</p>
+                            <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-bold">
+                                <MapPin size={10} className="text-zinc-400" />
                                 <span>{log.start_location} → {log.end_location}</span>
                             </div>
                         </div>
                         <div className="text-right">
-                           <p className="font-bold text-lg text-rose-400">{log.distance} km</p>
-                           <p className="text-xs text-zinc-500">{log.date}</p>
+                            <p className="text-lg font-black text-rose-500 tracking-tighter">{log.distance} KM</p>
+                            <p className="text-[10px] text-zinc-400 font-bold">{new Date(log.date).toLocaleDateString('en-CA', { month: 'short', day: 'numeric'})}</p>
                         </div>
                     </div>
-                </div>
-            )) : (
-                <div className="text-center text-zinc-500 py-8">
-                    <Car size={32} className="mx-auto mb-2" />
-                    No trips logged yet.
-                </div>
-            )}
+                )) : (
+                    <div className="text-center py-16 text-zinc-400 border-2 border-dashed border-zinc-100 dark:border-white/5 rounded-3xl">
+                        <Car size={32} className="mx-auto mb-2 opacity-20" />
+                        <p className="text-xs font-bold uppercase tracking-widest">No trips logged for {selectedYear}</p>
+                    </div>
+                )}
+            </div>
         </div>
       </div>
     </div>
