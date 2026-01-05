@@ -26,7 +26,8 @@ export const TransactionEditor: React.FC<TransactionEditorProps> = ({ isOpen, on
 
   const suggestedCategories = useMemo(() => {
     if (!formData) return [];
-    return budgets
+    // Get unique categories from the user's budget plan for this ledger type
+    return (budgets || [])
       .filter(b => b.ledger_type === formData.type)
       .map(b => b.category);
   }, [formData?.type, budgets]);
@@ -77,7 +78,7 @@ export const TransactionEditor: React.FC<TransactionEditorProps> = ({ isOpen, on
     });
   };
 
-  const amount = Math.abs(formData.amount); 
+  const amount = Math.abs(formData?.amount || 0); 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 dark:bg-black/80 backdrop-blur-sm p-4 sm:p-6">
@@ -109,28 +110,31 @@ export const TransactionEditor: React.FC<TransactionEditorProps> = ({ isOpen, on
 
             <div className="space-y-3">
                 <label className="text-[10px] text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-black tracking-widest">Allocation Category</label>
-                <div className="relative">
+                <div className="relative mb-3">
                     <Tag className="absolute left-4 top-3.5 text-zinc-400" size={16} />
                     <input 
                       type="text" 
-                      value={formData.category}
+                      value={formData.category || ''}
                       onChange={(e) => handleChange('category', e.target.value)}
                       className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/10 rounded-xl pl-11 pr-4 py-3.5 text-zinc-900 dark:text-white text-sm font-bold focus:outline-none focus:border-rose-500 transition-colors"
                       placeholder="Type category..."
                     />
                 </div>
-                
+
                 {suggestedCategories.length > 0 && (
                     <div className="space-y-2">
-                        <p className="text-[10px] font-bold text-zinc-400 px-1 uppercase tracking-wider">Planned Categories (Aggregation Ready)</p>
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-500 ml-1 uppercase font-black tracking-widest">Plan Categories</p>
                         <div className="flex flex-wrap gap-2">
                             {suggestedCategories.map(cat => (
-                                <button 
-                                    key={cat} 
+                                <button
+                                    key={cat}
                                     onClick={() => handleChange('category', cat)}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tight border transition-all flex items-center gap-1.5 ${formData.category === cat ? 'bg-zinc-900 dark:bg-white text-white dark:text-black border-zinc-900 dark:border-white shadow-md' : 'bg-white dark:bg-zinc-800 text-zinc-500 border-zinc-200 dark:border-white/5'}`}
+                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${
+                                        formData.category?.toLowerCase().trim() === cat.toLowerCase().trim() 
+                                        ? 'bg-zinc-900 dark:bg-white text-white dark:text-black border-zinc-900 dark:border-white shadow-md' 
+                                        : 'text-zinc-500 bg-zinc-100 dark:bg-zinc-800 border-transparent hover:border-zinc-300 dark:hover:border-zinc-700'
+                                    }`}
                                 >
-                                    {formData.category === cat && <Check size={10} />}
                                     {cat}
                                 </button>
                             ))}
@@ -141,14 +145,12 @@ export const TransactionEditor: React.FC<TransactionEditorProps> = ({ isOpen, on
 
             <div className="p-3 bg-violet-500/5 border border-violet-500/20 rounded-2xl">
                 <label className="flex items-center gap-3 cursor-pointer">
-                    <div className="relative">
-                        <input
-                            type="checkbox"
-                            checked={applyToVendor}
-                            onChange={(e) => setApplyToVendor(e.target.checked)}
-                            className="w-5 h-5 rounded-md border-zinc-300 dark:border-zinc-700 text-violet-500 focus:ring-violet-500/50"
-                        />
-                    </div>
+                    <input
+                        type="checkbox"
+                        checked={applyToVendor}
+                        onChange={(e) => setApplyToVendor(e.target.checked)}
+                        className="w-5 h-5 rounded-md border-zinc-300 dark:border-zinc-700 text-violet-500 focus:ring-violet-500/50"
+                    />
                     <div>
                         <p className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-tight flex items-center gap-1.5">
                             <Sparkles size={12} className="text-violet-500" /> Auto-Tag Vendor
@@ -157,45 +159,6 @@ export const TransactionEditor: React.FC<TransactionEditorProps> = ({ isOpen, on
                     </div>
                 </label>
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="text-[10px] text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-black tracking-widest">Transaction Date</label>
-                    <input 
-                      type="date" 
-                      value={formData.date}
-                      onChange={(e) => handleChange('date', e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-zinc-900 dark:text-white text-xs font-bold focus:outline-none focus:border-rose-500 transition-colors"
-                    />
-                </div>
-                <div>
-                    <label className="text-[10px] text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-black tracking-widest">Tax (HST) Tracking</label>
-                    <div className="h-[42px] flex items-center justify-center bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/10 rounded-xl">
-                        <label className="flex items-center gap-2 cursor-pointer text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                            <input
-                                type="checkbox"
-                                checked={!!formData.hstIncluded}
-                                onChange={(e) => handleChange('hstIncluded', e.target.checked)}
-                                className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 text-rose-500 focus:ring-rose-500/50"
-                            />
-                            HST Included
-                        </label>
-                    </div>
-                </div>
-            </div>
-
-            {formData.type === 'passive' && properties.length > 0 && (
-                <div className="animate-slide-up">
-                    <label className="text-[10px] text-zinc-500 dark:text-zinc-400 ml-1 mb-1 block uppercase font-black tracking-widest">Assign to Property</label>
-                    <select
-                        value={formData.propertyId || ''}
-                        onChange={(e) => handleChange('propertyId', e.target.value)}
-                        className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-cyan-600 dark:text-cyan-400 font-bold focus:outline-none focus:border-cyan-500 transition-colors"
-                    >
-                        {properties.map(p => <option key={p.id} value={p.id} className="bg-white dark:bg-zinc-900">{p.address}</option>)}
-                    </select>
-                </div>
-            )}
         </div>
 
         <div className="flex gap-4 mt-8 pt-4 border-t border-zinc-100 dark:border-white/5">

@@ -12,14 +12,12 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
   const { mileageAnnualStats, saveAnnualMileageStats } = useData();
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   
-  // Local state for odometer inputs
   const [startOdo, setStartOdo] = useState('');
   const [endOdo, setEndOdo] = useState('');
   const [isUpdatingStart, setIsUpdatingStart] = useState(false);
   const [isUpdatingEnd, setIsUpdatingEnd] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Dynamic Year Range
   const availableYears = useMemo(() => {
     const currentYear = new Date().getFullYear();
     const years = [];
@@ -29,12 +27,12 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
     return years;
   }, []);
 
-  // Sync inputs with stored stats when year changes
   useEffect(() => {
-    const stats = mileageAnnualStats.find(s => s.year === selectedYear);
+    const data = mileageAnnualStats || [];
+    const stats = data.find(s => s.year === selectedYear);
     if (stats) {
-      setStartOdo(stats.start_odometer.toString() || '');
-      setEndOdo(stats.end_odometer.toString() || '');
+      setStartOdo(stats.start_odometer?.toString() || '');
+      setEndOdo(stats.end_odometer?.toString() || '');
     } else {
       setStartOdo('');
       setEndOdo('');
@@ -42,12 +40,15 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
     setShowSuccess(false);
   }, [selectedYear, mileageAnnualStats]);
 
-  // Filter logs by year
   const yearLogs = useMemo(() => {
-    return logs.filter(log => new Date(log.date).getFullYear() === selectedYear);
+    const data = logs || [];
+    return data.filter(log => {
+        const parts = log.date.split('-').map(Number);
+        return parts[0] === selectedYear;
+    });
   }, [logs, selectedYear]);
 
-  const totalBusinessKm = useMemo(() => yearLogs.reduce((acc, log) => acc + log.distance, 0), [yearLogs]);
+  const totalBusinessKm = useMemo(() => yearLogs.reduce((acc, log) => acc + (log.distance || 0), 0), [yearLogs]);
   
   const startVal = parseInt(startOdo) || 0;
   const endVal = parseInt(endOdo) || 0;
@@ -65,16 +66,16 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
     else setIsUpdatingEnd(true);
     
     try {
-      const stats = mileageAnnualStats.find(s => s.year === selectedYear);
       await saveAnnualMileageStats({
         year: selectedYear,
-        start_odometer: type === 'start' ? startVal : (stats?.start_odometer || 0),
-        end_odometer: type === 'end' ? endVal : (stats?.end_odometer || 0)
+        start_odometer: type === 'start' ? startVal : undefined,
+        end_odometer: type === 'end' ? endVal : undefined
       });
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (err) {
-      alert("Failed to save odometer readings.");
+      console.error(err);
+      alert("Database Error: Ensure the 'mileage_annual_stats' table is correctly configured with RLS.");
     } finally {
       setIsUpdatingStart(false);
       setIsUpdatingEnd(false);
@@ -83,7 +84,6 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
 
   return (
     <div className="space-y-6 animate-slide-up pb-24">
-      {/* Year Selector and Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-200 dark:border-white/5 shadow-sm">
         <div>
           <h2 className="text-lg font-black text-zinc-900 dark:text-white uppercase tracking-tight">CRA Compliance Tracker</h2>
@@ -97,22 +97,19 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
               className="bg-transparent text-sm font-black uppercase tracking-widest text-zinc-900 dark:text-white py-2 pl-1 pr-8 outline-none cursor-pointer"
             >
               {availableYears.map(y => (
-                <option key={y} value={y} className="bg-white dark:bg-zinc-900">
-                  {y} {y === new Date().getFullYear() ? '(Current)' : 'Fiscal Year'}
-                </option>
+                <option key={y} value={y} className="bg-white dark:bg-zinc-900">{y}</option>
               ))}
             </select>
         </div>
       </div>
 
-      {/* Proportional Utilization Gauge */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-3xl p-6 shadow-sm relative overflow-hidden">
              <div className="flex justify-between items-start relative z-10">
                 <div>
                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Business Utilization Rate</p>
                    <h3 className={`text-4xl font-black tracking-tighter ${businessPercentage > 0 ? 'text-zinc-900 dark:text-white' : 'text-zinc-300 dark:text-zinc-700'}`}>
-                    {businessPercentage.toFixed(1)}%
+                    {(businessPercentage || 0).toFixed(1)}%
                    </h3>
                 </div>
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${businessPercentage > 0 ? 'bg-rose-500/10 text-rose-500' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'}`}>
@@ -122,10 +119,10 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
              
              <div className="mt-8 relative z-10">
                 <div className="flex justify-between text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
-                    <span>Business Use: {totalBusinessKm.toLocaleString()} KM</span>
+                    <span>Business Use: {(totalBusinessKm || 0).toLocaleString()} KM</span>
                     <span className={isInvalidOdo ? 'text-rose-500 flex items-center gap-1' : ''}>
                       {isInvalidOdo && <AlertCircle size={10} />}
-                      Total Driven: {totalDrivenKm > 0 ? totalDrivenKm.toLocaleString() : 0} KM
+                      Total Driven: {(totalDrivenKm > 0 ? totalDrivenKm.toLocaleString() : 0)} KM
                     </span>
                 </div>
                 <div className="h-4 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden border border-zinc-200 dark:border-white/5 shadow-inner">
@@ -139,7 +136,7 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
              <div className="mt-6 flex items-start gap-3 p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-white/5">
                 <Info size={16} className="text-zinc-400 mt-0.5 shrink-0" />
                 <p className="text-[10px] text-zinc-500 font-bold leading-relaxed uppercase tracking-tight">
-                    CRA requires your total kilometers driven for the year to calculate the percentage of vehicle expenses you can deduct. {isInvalidOdo && <span className="text-rose-500 font-black">Warning: End odometer must be greater than start.</span>}
+                    CRA requires your total kilometers driven for the year to calculate vehicle deductions.
                 </p>
              </div>
           </div>
@@ -147,9 +144,9 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
           <div className="bg-zinc-900 dark:bg-zinc-800 text-white rounded-3xl p-6 shadow-xl flex flex-col justify-between relative overflow-hidden">
              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2"></div>
              <div>
-                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Est. Tax Savings ({selectedYear})</p>
+                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Est. Deductible Amount</p>
                 <h3 className="text-3xl font-black text-emerald-400 tracking-tighter">
-                  ${estimatedDeduction.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  ${(estimatedDeduction || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </h3>
              </div>
              <div className="mt-4">
@@ -161,7 +158,6 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Odometer Input Card */}
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-3xl p-6 shadow-sm">
             <h3 className="font-black text-zinc-900 dark:text-white uppercase tracking-tighter mb-6 flex items-center gap-2">
                 <Car size={18} className="text-rose-500" /> Fiscal Odometer Readings
@@ -181,7 +177,7 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
                         <button 
                             onClick={() => handleSaveOdometer('start')}
                             disabled={isUpdatingStart || !startOdo}
-                            className="px-4 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-2xl flex items-center justify-center hover:opacity-90 disabled:opacity-50 transition-all shadow-md"
+                            className="px-4 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-2xl flex items-center justify-center hover:opacity-90 disabled:opacity-50 transition-all shadow-md active:scale-95"
                         >
                             {isUpdatingStart ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                         </button>
@@ -201,7 +197,7 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
                         <button 
                             onClick={() => handleSaveOdometer('end')}
                             disabled={isUpdatingEnd || !endOdo || isInvalidOdo}
-                            className="px-4 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-2xl flex items-center justify-center hover:opacity-90 disabled:opacity-50 transition-all shadow-md"
+                            className="px-4 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-2xl flex items-center justify-center hover:opacity-90 disabled:opacity-50 transition-all shadow-md active:scale-95"
                         >
                             {isUpdatingEnd ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                         </button>
@@ -210,13 +206,12 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
 
                 {showSuccess && (
                     <div className="flex items-center gap-2 text-emerald-500 font-black text-[10px] uppercase tracking-widest animate-pulse">
-                        <CheckCircle size={14} /> Fiscal Log Synced to Cloud
+                        <CheckCircle size={14} /> Fiscal Log Synced
                     </div>
                 )}
             </div>
         </div>
 
-        {/* Trip Log List */}
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-3xl p-6 shadow-sm">
             <div className="flex justify-between items-center mb-6">
                 <h3 className="font-black text-zinc-900 dark:text-white uppercase tracking-tighter">Business Trip Log</h3>
@@ -229,15 +224,15 @@ export const MileageView: React.FC<MileageViewProps> = ({ logs, onAddTrip }) => 
                 {yearLogs.length > 0 ? yearLogs.map((log) => (
                     <div key={log.id} className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/30 border border-zinc-200 dark:border-white/5 flex justify-between items-center group hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all">
                         <div className="space-y-1">
-                            <p className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">{log.purpose}</p>
+                            <p className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">{log.purpose || 'Business Trip'}</p>
                             <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-bold">
                                 <MapPin size={10} className="text-zinc-400" />
-                                <span>{log.start_location} → {log.end_location}</span>
+                                <span>{log.start_location || 'Start'} → {log.end_location || 'End'}</span>
                             </div>
                         </div>
                         <div className="text-right">
-                            <p className="text-lg font-black text-rose-500 tracking-tighter">{log.distance} KM</p>
-                            <p className="text-[10px] text-zinc-400 font-bold">{new Date(log.date).toLocaleDateString('en-CA', { month: 'short', day: 'numeric'})}</p>
+                            <p className="text-lg font-black text-rose-500 tracking-tighter">{(log.distance || 0)} KM</p>
+                            <p className="text-[10px] text-zinc-400 font-bold">{new Date(log.date + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric'})}</p>
                         </div>
                     </div>
                 )) : (

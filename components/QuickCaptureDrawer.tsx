@@ -8,7 +8,7 @@ import { supabase } from '../supabaseClient';
 import { generateJournalEntryPayload } from '../utils/accountingEngine';
 
 interface QuickCaptureDrawerProps {
-  isOpen: boolean; // Kept for consistency and potential parent animations, though mounting handles visibility now
+  isOpen: boolean; 
   onClose: () => void;
   onAddTransaction: (transaction: Omit<Transaction, 'id' | 'status'> | Omit<Transaction, 'id' | 'status'>[]) => Promise<void>;
   properties: Property[];
@@ -37,33 +37,40 @@ const expenseCategories = ['Supplies', 'Repairs', 'Fuel/Auto', 'Meals', 'Adverti
 const incomeCategories = ['Commission', 'Rental Income', 'Consulting', 'Referral Fee', 'Other Income'];
 
 export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, onClose, onAddTransaction, properties, budgets }) => {
-  // Initial state logic is now clean because component remounts on open
   const [entryType, setEntryType] = useState<'expense' | 'income'>('expense');
   const [amount, setAmount] = useState<string>('');
   const [vendor, setVendor] = useState('');
-  const [splitRatio, setSplitRatio] = useState(50);
+  const [splitRatio, setSplitRatio] = useState(100); // Default to 100% Active for agents
   const [includeHST, setIncludeHST] = useState(true);
   const [category, setCategory] = useState('Supplies');
   const [isScanning, setIsScanning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [receiptImage, setReceiptImage] = useState<string | null>(null);
   const [selectedProperty, setSelectedProperty] = useState(properties.length > 0 ? properties[0].id : '');
-  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
-  const [liveTranscription, setLiveTranscription] = useState('');
   const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'credit_card' | 'bank' | 'cash'>('credit_card');
-  const recognitionRef = useRef<any | null>(null);
 
   const currentLedger = splitRatio === 100 ? 'active' : (splitRatio === 0 ? 'passive' : 'personal');
+
+  // Dynamically derive categories from the budget plan
+  const categoriesToShow = useMemo(() => {
+    if (entryType === 'income') return incomeCategories;
+    
+    // Filter budgets for current ledger and extract categories
+    const planCategories = budgets
+        .filter(b => b.ledger_type === currentLedger)
+        .map(b => b.category);
+    
+    // If no plan is defined, fall back to defaults
+    return planCategories.length > 0 ? planCategories : expenseCategories;
+  }, [budgets, currentLedger, entryType]);
 
   // Budget Impact Calculation
   const budgetImpact = useMemo(() => {
     if (entryType === 'income' || !amount) return null;
     const numAmt = parseFloat(amount) || 0;
     
-    // Filter budgets for the currently implied ledger
     const relevantBudgets = budgets.filter(b => b.ledger_type === currentLedger);
-    const targetBudget = relevantBudgets.find(b => b.category.toLowerCase() === category.toLowerCase());
+    const targetBudget = relevantBudgets.find(b => b.category.toLowerCase().trim() === category.toLowerCase().trim());
     
     if (!targetBudget) return null;
 
@@ -82,8 +89,11 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
   }, [category, amount, budgets, entryType, currentLedger]);
 
   useEffect(() => {
-    setCategory(entryType === 'expense' ? 'Supplies' : 'Commission');
-  }, [entryType]);
+    // When the grid changes, ensure the selected category is valid for the new grid
+    if (categoriesToShow.length > 0 && !categoriesToShow.includes(category)) {
+        setCategory(categoriesToShow[0]);
+    }
+  }, [categoriesToShow]);
 
   useEffect(() => {
     const debounceTimer = setTimeout(() => {
@@ -198,8 +208,6 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
   };
 
   const numAmount = parseFloat(amount) || 0;
-  const hstAmount = includeHST ? numAmount - (numAmount / (1 + ONTARIO_HST_RATE)) : 0;
-  const categoriesToShow = entryType === 'expense' ? expenseCategories : incomeCategories;
 
   if (!isOpen) return null;
 
@@ -254,11 +262,12 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
                 <div className="grid grid-cols-3 gap-2">
                     {categoriesToShow.map(cat => {
                         const isSuggested = aiSuggestions?.category?.toLowerCase() === cat.toLowerCase();
+                        const isActive = category.toLowerCase().trim() === cat.toLowerCase().trim();
                         return (
                             <button 
                                 key={cat}
                                 onClick={() => setCategory(cat)}
-                                className={`relative py-3 rounded-xl text-[10px] font-black uppercase tracking-tight border transition-all ${category === cat ? 'bg-zinc-900 dark:bg-white text-white dark:text-black border-zinc-900 dark:border-white shadow-lg' : isSuggested ? 'bg-violet-500/10 text-violet-600 border-violet-500/30' : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-800'}`}
+                                className={`relative py-3 rounded-xl text-[10px] font-black uppercase tracking-tight border transition-all ${isActive ? 'bg-zinc-900 dark:bg-white text-white dark:text-black border-zinc-900 dark:border-white shadow-lg' : isSuggested ? 'bg-violet-500/10 text-violet-600 border-violet-500/30' : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-800'}`}
                             >
                                 {isSuggested && <div className="absolute -top-1.5 -right-1.5 p-0.5 bg-violet-600 text-white rounded-full"><Zap size={10} fill="currentColor" /></div>}
                                 {cat}
@@ -298,11 +307,11 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
             <div className="flex justify-between items-end mb-4">
               <div className="text-left text-rose-500">
                 <p className="text-[10px] font-black tracking-widest uppercase">ACTIVE</p>
-                <p className="text-xl font-black">${((numAmount - hstAmount) * (splitRatio / 100)).toFixed(2)}</p>
+                <p className="text-xl font-black">${((numAmount - (includeHST ? numAmount * 0.115 : 0)) * (splitRatio / 100)).toFixed(2)}</p>
               </div>
               <div className="text-right text-cyan-600 dark:text-cyan-400">
                 <p className="text-[10px] font-black tracking-widest uppercase">PASSIVE</p>
-                <p className="text-xl font-black">${((numAmount - hstAmount) * ((100 - splitRatio) / 100)).toFixed(2)}</p>
+                <p className="text-xl font-black">${((numAmount - (includeHST ? numAmount * 0.115 : 0)) * ((100 - splitRatio) / 100)).toFixed(2)}</p>
               </div>
             </div>
             <div className="relative h-8 flex items-center mb-4 touch-none">

@@ -30,7 +30,7 @@ interface DataContextType {
   saveBudget: (budgets: BudgetCategory[]) => Promise<void>;
   saveProperty: (prop: Omit<Property, 'id'>) => Promise<void>;
   saveMileage: (log: Omit<MileageLog, 'id'>) => Promise<void>;
-  saveAnnualMileageStats: (stats: Omit<MileageAnnualStats, 'id'>) => Promise<void>;
+  saveAnnualMileageStats: (stats: Partial<MileageAnnualStats> & { year: number }) => Promise<void>;
   saveInvoice: (inv: Omit<Invoice, 'id'> | Invoice) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
   updateProfile: (profile: UserProfile) => Promise<void>;
@@ -86,20 +86,61 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
-  // Fetch Data
+  /**
+   * Calculates current spending per budget category and pushes it to Supabase
+   * to ensure the 'spent' column in the table is always accurate.
+   */
+  const syncSpentToDatabase = async (currentTransactions: Transaction[], currentBudgets: BudgetCategory[]) => {
+    if (!session?.user || currentBudgets.length === 0) return;
+
+    const spendingMap = new Map<string, number>();
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
+    currentTransactions.forEach(t => {
+      if (!t.date || t.amount >= 0) return;
+      const parts = t.date.split('-').map(Number);
+      if (parts.length < 2) return;
+      
+      const tYear = parts[0];
+      const tMonth = parts[1] - 1;
+
+      if (tMonth === currentMonth && tYear === currentYear) {
+        const key = `${(t.type || 'personal').toLowerCase()}_${(t.category || 'Uncategorized').toLowerCase().trim()}`;
+        spendingMap.set(key, (spendingMap.get(key) || 0) + Math.abs(t.amount));
+      }
+    });
+
+    const updates = currentBudgets.filter(b => !!b.id).map(b => {
+      const key = `${(b.ledger_type || 'personal').toLowerCase()}_${(b.category || 'Uncategorized').toLowerCase().trim()}`;
+      return {
+        id: b.id,
+        spent: spendingMap.get(key) || 0
+      };
+    });
+
+    if (updates.length > 0) {
+      await supabase.from('budget_categories').upsert(updates);
+    }
+  };
+
   const fetchBudgets = async () => {
     if (!session?.user) return;
     const { data, error } = await supabase.from('budget_categories').select('*');
-    if (error) throw error;
+    if (error) {
+        console.error("Fetch Budgets Error:", error);
+        return;
+    }
     if (data) {
         setBudgetSettings(data.map((b: any) => ({
             id: b.id,
-            category: b.category, 
-            spent: 0, 
-            limit: b.limit, 
+            category: b.category || 'Uncategorized',
+            spent: Number(b.spent || 0), // Use persistent 'spent' column from DB
+            limit: Number(b.limit || 0), 
             savingsGoal: b.savings_goal, 
             user_id: b.user_id,
-            ledger_type: b.ledger_type
+            ledger_type: (b.ledger_type || 'personal').toLowerCase() as LedgerType
         })));
     }
   };
@@ -108,42 +149,68 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!session?.user) return;
     const { user } = session;
 
-    const [txRes, propRes, profRes, mileRes, mileStatsRes, invRes] = await Promise.all([
-        supabase.from('transactions').select('*').order('date', { ascending: false }),
-        supabase.from('properties').select('*'),
-        supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('mileage_logs').select('*').order('date', { ascending: false }),
-        supabase.from('mileage_annual_stats').select('*'),
-        supabase.from('invoices').select('*').order('invoice_date', { ascending: false }),
-    ]);
-    
-    await fetchBudgets();
+    try {
+        await fetchBudgets();
 
-    if (txRes.data) {
-        setTransactions(txRes.data.map((d: any) => ({
-            id: d.id, date: d.date, vendor: d.vendor, amount: d.amount, type: d.type, category: d.category,
-            taxForm: d.tax_form, status: d.status, isSplit: d.is_split || false, hstIncluded: d.hst_included || false,
-            hstAmount: d.hst_amount || 0, propertyId: d.property_id, receiptUrl: d.receipt_url, user_id: d.user_id, is_commission: d.is_commission
-        })));
+        const [txRes, propRes, profRes, mileRes, mileStatsRes, invRes] = await Promise.all([
+            supabase.from('transactions').select('*').order('date', { ascending: false }),
+            supabase.from('properties').select('*'),
+            supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+            supabase.from('mileage_logs').select('*').order('date', { ascending: false }),
+            supabase.from('mileage_annual_stats').select('*'),
+            supabase.from('invoices').select('*').order('invoice_date', { ascending: false }),
+        ]);
+
+        let loadedTxs: Transaction[] = [];
+        if (txRes.data) {
+            loadedTxs = txRes.data.map((d: any) => ({
+                id: d.id, 
+                date: d.date, 
+                vendor: d.vendor, 
+                amount: Number(d.amount || 0), 
+                type: (d.type || 'personal').toLowerCase() as LedgerType, 
+                category: d.category || 'Uncategorized',
+                taxForm: d.tax_form, 
+                status: d.status, 
+                isSplit: d.is_split || false, 
+                hstIncluded: d.hst_included || false,
+                hstAmount: Number(d.hst_amount || 0), 
+                propertyId: d.property_id, 
+                receiptUrl: d.receipt_url, 
+                user_id: d.user_id, 
+                is_commission: d.is_commission
+            }));
+            setTransactions(loadedTxs);
+        }
+
+        if (propRes.data) {
+            setProperties(propRes.data.map((p: any) => ({
+                id: p.id, address: p.address, purchasePrice: Number(p.purchase_price || 0), currentValue: Number(p.current_value || 0), ccaClass: p.cca_class,
+                openingUcc: Number(p.opening_ucc || 0), additions: Number(p.additions || 0), tenantName: p.tenant_name, lease_end: p.lease_end, user_id: p.user_id, mortgageBalance: Number(p.mortgage_balance || 0)
+            })));
+        }
+        if (mileRes.data) setMileageLogs(mileRes.data);
+        if (mileStatsRes.data) setMileageAnnualStats(mileStatsRes.data);
+        
+        if (profRes.data) setUserProfile(profRes.data);
+        else setUserProfile({ id: user.id, full_name: '', role: 'Real Estate Professional', avatar_url: '' });
+        
+        if (invRes.data) setInvoices(invRes.data);
+
+        // Perform background sync of 'spent' column after initial data load
+        if (loadedTxs.length > 0) {
+          syncSpentToDatabase(loadedTxs, budgetSettings);
+        }
+
+    } catch (e) {
+        console.warn("Initial data fetch encountered issues.", e);
     }
-    if (propRes.data) {
-        setProperties(propRes.data.map((p: any) => ({
-            id: p.id, address: p.address, purchasePrice: p.purchase_price, currentValue: p.current_value, ccaClass: p.cca_class,
-            openingUcc: p.opening_ucc, additions: p.additions, tenantName: p.tenant_name, lease_end: p.lease_end, user_id: p.user_id, mortgageBalance: p.mortgage_balance
-        })));
-    }
-    if (mileRes.data) setMileageLogs(mileRes.data);
-    if (mileStatsRes.data) setMileageAnnualStats(mileStatsRes.data);
-    if (profRes.data) setUserProfile(profRes.data);
-    else setUserProfile({ id: user.id, full_name: '', role: 'Real Estate Professional', avatar_url: '' });
-    if (invRes.data) setInvoices(invRes.data);
   };
 
   useEffect(() => {
     if (session) fetchInitialData();
   }, [session]);
 
-  // Derived State: Budgets (Refined for exact matching and robust month-only tracking)
   const calculatedBudgetsByLedger = useMemo(() => {
     const spendingMap: Record<LedgerType, Map<string, number>> = {
       active: new Map(),
@@ -156,27 +223,31 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const currentYear = today.getFullYear();
 
     transactions.forEach(t => {
-        // Robust Date Parsing (split YYYY-MM-DD to avoid UTC day shifts)
-        const dateParts = t.date.split('-').map(Number);
-        const tYear = dateParts[0];
-        const tMonth = dateParts[1] - 1; // 0-indexed month
+        if (!t.date) return;
+        const parts = t.date.split('-').map(Number);
+        if (parts.length < 2) return;
+        
+        const tYear = parts[0];
+        const tMonth = parts[1] - 1; 
 
-        // Aggregation logic: Only expenses for the current calendar month
         if (t.amount < 0 && tMonth === currentMonth && tYear === currentYear) {
-            const map = spendingMap[t.type];
-            // Normalize for matching: lowercase and trimmed
+            const ledgerType = (t.type || 'personal').toLowerCase() as LedgerType;
+            const map = spendingMap[ledgerType];
+            if (!map) return;
+            
             const normalizedCat = (t.category || 'Uncategorized').toLowerCase().trim();
-            map.set(normalizedCat, (map.get(normalizedCat) || 0) + Math.abs(t.amount));
+            map.set(normalizedCat, (map.get(normalizedCat) || 0) + Math.abs(t.amount || 0));
         }
     });
 
     const result: Record<LedgerType, BudgetCategory[]> = { active: [], passive: [], personal: [] };
     
     budgetSettings.forEach(b => {
-      const list = result[b.ledger_type];
+      const ledgerType = (b.ledger_type || 'personal').toLowerCase() as LedgerType;
+      const list = result[ledgerType];
       if (list) {
-          const normalizedPlanCat = b.category.toLowerCase().trim();
-          const actualSpent = spendingMap[b.ledger_type].get(normalizedPlanCat) || 0;
+          const normalizedPlanCat = (b.category || 'Uncategorized').toLowerCase().trim();
+          const actualSpent = spendingMap[ledgerType].get(normalizedPlanCat) || 0;
           list.push({ ...b, spent: actualSpent });
       }
     });
@@ -184,12 +255,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return result;
   }, [transactions, budgetSettings]);
 
-  // CRUD Actions
   const updateTransaction = async (updatedTx: Transaction, updateAllFromVendor: boolean = true) => {
     if (!session?.user) return;
     const hstAmount = updatedTx.hstIncluded ? Math.abs(updatedTx.amount) - (Math.abs(updatedTx.amount) / (1 + ONTARIO_HST_RATE)) : 0;
     
-    // 1. Update the single transaction
     const { error: singleError } = await supabase.from('transactions').update({ 
         date: updatedTx.date, vendor: updatedTx.vendor, amount: updatedTx.amount, type: updatedTx.type, 
         category: updatedTx.category, tax_form: updatedTx.taxForm, property_id: updatedTx.propertyId, 
@@ -198,19 +267,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     if (singleError) throw singleError;
 
-    // 2. Vendor Propagation: Bulk update categorizations for this user/vendor
     if (updateAllFromVendor && updatedTx.vendor) {
-        const { error: bulkError } = await supabase.from('transactions')
+        await supabase.from('transactions')
             .update({ 
                 category: updatedTx.category, 
                 type: updatedTx.type,
                 tax_form: updatedTx.taxForm
             })
             .eq('user_id', session.user.id)
-            .ilike('vendor', updatedTx.vendor)
+            .ilike('vendor', updatedTx.vendor.trim())
             .neq('id', updatedTx.id); 
-        
-        if (bulkError) console.warn("Vendor sync failed:", bulkError);
     }
     
     await fetchInitialData();
@@ -233,11 +299,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (error) throw error;
     setTransactions(prev => prev.filter(t => t.id !== id));
+    // Background sync spent column after deletion
+    syncSpentToDatabase(transactions.filter(t => t.id !== id), budgetSettings);
   };
 
   const saveBudget = async (newBudgets: BudgetCategory[]) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) throw new Error("You must be logged in to save budgets.");
+    if (!session?.user) throw new Error("Authentication required");
     const userId = session.user.id;
     
     const incomingIds = new Set<string>(newBudgets.map(b => b.id).filter((id): id is string => !!id));
@@ -245,31 +312,31 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const idsToDelete = [...currentIds].filter(id => !incomingIds.has(id));
 
     if (idsToDelete.length > 0) {
-        const { error: deleteError } = await supabase.from('budget_categories').delete().in('id', idsToDelete);
-        if (deleteError) throw new Error(`Failed to delete removed categories: ${deleteError.message}`);
+        await supabase.from('budget_categories').delete().in('id', idsToDelete);
     }
 
     const updates = newBudgets.filter(b => !!b.id).map(b => ({
-        id: b.id, category: b.category, limit: b.limit, savings_goal: b.savingsGoal ?? null,
-        user_id: userId, ledger_type: b.ledger_type || 'active', 
+        id: b.id, 
+        category: b.category, 
+        limit: Number(b.limit || 0), 
+        spent: Number(b.spent || 0), // Persist current spent during configuration save
+        savings_goal: b.savingsGoal ?? null,
+        user_id: userId, 
+        ledger_type: b.ledger_type || 'active', 
     }));
 
     const inserts = newBudgets.filter(b => !b.id).map(b => ({
-        category: b.category, limit: b.limit, savings_goal: b.savingsGoal ?? null,
-        user_id: userId, ledger_type: b.ledger_type || 'active', 
+        category: b.category, 
+        limit: Number(b.limit || 0), 
+        spent: Number(b.spent || 0),
+        savings_goal: b.savingsGoal ?? null,
+        user_id: userId, 
+        ledger_type: b.ledger_type || 'active', 
     }));
 
-    if (updates.length > 0) {
-        const { error: updateError } = await supabase.from('budget_categories').upsert(updates);
-        if (updateError) throw new Error(`Failed to update categories: ${updateError.message}`);
-    }
-
-    if (inserts.length > 0) {
-        const { error: insertError } = await supabase.from('budget_categories').insert(inserts);
-        if (insertError) throw new Error(`Failed to create new categories: ${insertError.message}`);
-    }
+    if (updates.length > 0) await supabase.from('budget_categories').upsert(updates);
+    if (inserts.length > 0) await supabase.from('budget_categories').insert(inserts);
     
-    await fetchBudgets();
     await fetchInitialData(); 
   };
 
@@ -288,11 +355,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await fetchInitialData();
   };
 
-  const saveAnnualMileageStats = async (stats: Omit<MileageAnnualStats, 'id'>) => {
-    const { error } = await supabase.from('mileage_annual_stats').upsert({
-      ...stats,
-      user_id: session?.user.id
-    }, { onConflict: 'user_id,year' });
+  const saveAnnualMileageStats = async (stats: Partial<MileageAnnualStats> & { year: number }) => {
+    if (!session?.user) return;
+    const existing = mileageAnnualStats.find(s => s.year === stats.year);
+    const payload = {
+      year: stats.year,
+      user_id: session.user.id,
+      start_odometer: stats.start_odometer !== undefined ? stats.start_odometer : (existing?.start_odometer || 0),
+      end_odometer: stats.end_odometer !== undefined ? stats.end_odometer : (existing?.end_odometer || 0)
+    };
+    
+    const { error } = await supabase.from('mileage_annual_stats').upsert(payload, { onConflict: 'user_id,year' });
     if (error) throw error;
     await fetchInitialData();
   };

@@ -29,8 +29,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoices, onNewInvoice
   const [filter, setFilter] = useState<StatusFilter>('all');
   
   const filteredInvoices = useMemo(() => {
+    const data = invoices || [];
     const today = new Date().toISOString().split('T')[0];
-    const updatedInvoices = invoices.map(inv => {
+    const updatedInvoices = data.map(inv => {
         if (inv.status !== 'paid' && inv.due_date < today) {
             return { ...inv, status: 'overdue' as 'overdue' };
         }
@@ -46,7 +47,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoices, onNewInvoice
       <header className="flex justify-between items-center">
         <div>
           <h2 className="text-xl font-bold text-white">Invoices</h2>
-          <p className="text-sm text-zinc-400">{invoices.length} total invoices</p>
+          <p className="text-sm text-zinc-400">{(invoices || []).length} total invoices</p>
         </div>
         <button 
           onClick={onNewInvoice} 
@@ -77,14 +78,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({ invoices, onNewInvoice
                     <FileText size={18} className="text-zinc-400"/>
                  </div>
                  <div>
-                    <p className="font-semibold text-white">{invoice.client_name}</p>
+                    <p className="font-semibold text-white">{invoice.client_name || 'Unnamed Client'}</p>
                     <p className="text-xs text-zinc-400">
                       Inv #{invoice.invoice_number} • Due: {new Date(invoice.due_date).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC'})}
                     </p>
                  </div>
               </div>
               <div className="flex items-center gap-4">
-                 <p className="font-bold text-white text-right">${invoice.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                 <p className="font-bold text-white text-right">${(invoice.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                  <StatusBadge status={invoice.status} />
               </div>
             </button>

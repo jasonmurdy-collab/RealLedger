@@ -48,28 +48,30 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
   const filteredExpenses = useMemo(() => {
     return transactions
       .filter(t => {
-        const matchesSearch = t.vendor.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                             t.category.toLowerCase().includes(searchTerm.toLowerCase());
+        const vendor = t.vendor || 'Unknown Vendor';
+        const category = t.category || 'Uncategorized';
+        const matchesSearch = vendor.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                             category.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesLedger = selectedLedger === 'all' || t.type === selectedLedger;
-        const matchesCategory = selectedCategory === 'all' || t.category === selectedCategory;
+        const matchesCategory = selectedCategory === 'all' || (t.category || 'Uncategorized') === selectedCategory;
         const matchesMonth = selectedMonth === 'all' || new Date(t.date).getMonth() === selectedMonth;
-        const isExpense = t.amount < 0; // Primarily focus on outflows
+        const isExpense = (t.amount || 0) < 0;
 
         return matchesSearch && matchesLedger && matchesCategory && matchesMonth && isExpense;
       })
       .sort((a, b) => {
         let comparison = 0;
         if (sortField === 'date') comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
-        if (sortField === 'amount') comparison = Math.abs(a.amount) - Math.abs(b.amount);
-        if (sortField === 'vendor') comparison = a.vendor.localeCompare(b.vendor);
-        if (sortField === 'category') comparison = a.category.localeCompare(b.category);
+        if (sortField === 'amount') comparison = Math.abs(a.amount || 0) - Math.abs(b.amount || 0);
+        if (sortField === 'vendor') comparison = (a.vendor || '').localeCompare(b.vendor || '');
+        if (sortField === 'category') comparison = (a.category || '').localeCompare(b.category || '');
         
         return sortOrder === 'desc' ? -comparison : comparison;
       });
   }, [transactions, searchTerm, selectedLedger, selectedCategory, selectedMonth, sortField, sortOrder]);
 
   const totalFilteredSpend = useMemo(() => {
-    return Math.abs(filteredExpenses.reduce((sum, t) => sum + t.amount, 0));
+    return Math.abs(filteredExpenses.reduce((sum, t) => sum + (t.amount || 0), 0));
   }, [filteredExpenses]);
 
   const handleSort = (field: SortField) => {
@@ -84,7 +86,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
   const isAggregated = (tx: Transaction) => {
     return budgets.some(b => 
         b.ledger_type === tx.type && 
-        b.category.toLowerCase() === tx.category.toLowerCase()
+        (b.category || '').toLowerCase() === (tx.category || '').toLowerCase()
     );
   };
 
@@ -142,7 +144,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
 
       {/* Summary Insights Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <SummaryBox label="Filtered Volume" value={`$${totalFilteredSpend.toLocaleString()}`} icon={<DollarSign size={16}/>} color="zinc" />
+          <SummaryBox label="Filtered Volume" value={`$${(totalFilteredSpend || 0).toLocaleString()}`} icon={<DollarSign size={16}/>} color="zinc" />
           <SummaryBox label="Items Found" value={filteredExpenses.length.toString()} icon={<FileText size={16}/>} color="zinc" />
           <SummaryBox label="Avg. Cost" value={`$${(filteredExpenses.length > 0 ? totalFilteredSpend / filteredExpenses.length : 0).toFixed(0)}`} icon={<TrendingUpIcon size={16}/>} color="zinc" />
           <SummaryBox label="Time Period" value={selectedMonth === 'all' ? 'Annual' : MONTH_NAMES[selectedMonth]} icon={<Calendar size={16}/>} color="zinc" />
@@ -165,13 +167,14 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
                   <tbody className="divide-y divide-zinc-100 dark:divide-white/5">
                       {filteredExpenses.map(tx => {
                           const linked = isAggregated(tx);
+                          const txAmount = Math.abs(tx.amount || 0);
                           return (
                           <tr key={tx.id} className="group hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
                               <td className="p-4">
                                   <p className="text-xs font-bold text-zinc-900 dark:text-white">{new Date(tx.date).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
                               </td>
                               <td className="p-4">
-                                  <p className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">{tx.vendor}</p>
+                                  <p className="text-sm font-black text-zinc-900 dark:text-white uppercase tracking-tight">{tx.vendor || 'Unknown Vendor'}</p>
                                   {tx.propertyId && (
                                       <p className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold flex items-center gap-1 mt-0.5">
                                           <Building2 size={10} /> {properties.find(p => p.id === tx.propertyId)?.address}
@@ -181,7 +184,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
                               <td className="p-4">
                                   <div className="flex items-center gap-2">
                                       <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-md">
-                                          {tx.category}
+                                          {tx.category || 'Uncategorized'}
                                       </span>
                                       {linked ? (
                                           <CheckCircle2 size={12} className="text-emerald-500 opacity-60" />
@@ -200,10 +203,10 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({ transactions, proper
                               </td>
                               <td className="p-4 text-right">
                                   <p className="text-sm font-black text-zinc-900 dark:text-white">
-                                      ${Math.abs(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                      ${(txAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                   </p>
                                   {tx.hstAmount! > 0 && (
-                                      <p className="text-[9px] text-zinc-400 font-bold">Incl. ${tx.hstAmount?.toFixed(2)} HST</p>
+                                      <p className="text-[9px] text-zinc-400 font-bold">Incl. ${ (tx.hstAmount || 0).toFixed(2) } HST</p>
                                   )}
                               </td>
                               <td className="p-4 text-right">
@@ -257,7 +260,7 @@ const SummaryBox = ({ label, value, icon, color }: any) => (
             {icon}
             <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
         </div>
-        <p className="text-xl font-black text-zinc-900 dark:text-white tracking-tighter">{value}</p>
+        <p className="text-xl font-black text-zinc-900 dark:text-white tracking-tighter">{value || '0'}</p>
     </div>
 );
 
