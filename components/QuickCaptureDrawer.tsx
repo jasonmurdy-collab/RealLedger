@@ -49,7 +49,7 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
   const [selectedProperty, setSelectedProperty] = useState(properties.length > 0 ? properties[0].id : '');
   const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion | null>(null);
 
-  const currentLedger = splitRatio === 100 ? 'active' : (splitRatio === 0 ? 'passive' : 'personal');
+  const currentLedger = splitRatio > 0 && splitRatio < 100 ? 'personal' : (splitRatio === 100 ? 'active' : 'passive');
 
   // Dynamically derive categories from the budget plan
   const categoriesToShow = useMemo(() => {
@@ -75,7 +75,7 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
     if (!targetBudget) return null;
 
     const newTotal = targetBudget.spent + numAmt;
-    const percentage = Math.min((newTotal / targetBudget.limit) * 100, 100);
+    const percentage = targetBudget.limit > 0 ? Math.min((newTotal / targetBudget.limit) * 100, 100) : (newTotal > 0 ? 100 : 0);
     const isOver = newTotal > targetBudget.limit;
     
     return {
@@ -279,8 +279,8 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
           </div>
 
           {budgetImpact && (
-              <div className={`p-4 rounded-2xl border animate-slide-up shadow-sm transition-colors ${budgetImpact.isOver ? 'bg-rose-500/5 border-rose-500/20' : 'bg-violet-500/5 border-violet-500/20'}`}>
-                 <div className="flex justify-between items-center mb-2">
+            <div className={`p-4 rounded-2xl border animate-slide-up shadow-sm transition-colors ${budgetImpact.isOver ? 'bg-rose-500/5 border-rose-500/20' : 'bg-violet-500/5 border-violet-500/20'}`}>
+                <div className="flex justify-between items-center mb-3">
                     <div className="flex items-center gap-2">
                         <Target size={14} className={budgetImpact.isOver ? 'text-rose-500' : 'text-violet-500'} />
                         <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Budget Impact: {budgetImpact.category}</span>
@@ -288,19 +288,33 @@ export const QuickCaptureDrawer: React.FC<QuickCaptureDrawerProps> = ({ isOpen, 
                     <span className={`text-[10px] font-black uppercase ${budgetImpact.isOver ? 'text-rose-500' : 'text-violet-500'}`}>
                         {budgetImpact.percentage.toFixed(0)}% Utilized
                     </span>
-                 </div>
-                 <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden shadow-inner">
+                </div>
+
+                <div className="space-y-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-3">
+                    <div className="flex justify-between items-center"><span>Current Spent</span> <span className="font-bold text-zinc-800 dark:text-zinc-200">${budgetImpact.current.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>
+                    <div className="flex justify-between items-center"><span>This Expense</span> <span className="font-bold text-zinc-800 dark:text-zinc-200">+ ${budgetImpact.impact.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>
+                    <div className="flex justify-between items-center border-t border-zinc-200 dark:border-white/10 pt-1.5 mt-1.5">
+                        <span className="font-bold text-zinc-800 dark:text-zinc-200">New Total</span>
+                        <span className={`font-black ${budgetImpact.isOver ? 'text-rose-500' : 'text-zinc-900 dark:text-white'}`}>${(budgetImpact.current + budgetImpact.impact).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-zinc-400 dark:text-zinc-500 text-[10px] font-bold">
+                        <span>Planned Limit</span>
+                        <span>/ ${(budgetImpact.limit || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                    </div>
+                </div>
+
+                <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden shadow-inner">
                     <div 
                         className={`h-full transition-all duration-700 ease-out ${budgetImpact.isOver ? 'bg-rose-500' : 'bg-violet-600'}`} 
                         style={{ width: `${budgetImpact.percentage}%` }}
                     />
-                 </div>
-                 {budgetImpact.isOver && (
-                     <p className="text-[10px] text-rose-500 font-bold mt-2 flex items-center gap-1">
-                        <XCircle size={10} /> This transaction exceeds your planned {budgetImpact.category} limit.
-                     </p>
-                 )}
-              </div>
+                </div>
+                {budgetImpact.isOver && (
+                    <p className="text-[10px] text-rose-500 font-bold mt-2 flex items-center gap-1">
+                        <XCircle size={10} /> This transaction exceeds your planned limit.
+                    </p>
+                )}
+            </div>
           )}
 
           <div className="bg-zinc-50 dark:bg-zinc-900/40 rounded-2xl p-5 border border-zinc-200 dark:border-white/5 shadow-sm">

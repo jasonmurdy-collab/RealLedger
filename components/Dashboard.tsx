@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useData } from '../context/DataContext';
 import { MetricsCard } from './MetricsCard';
 import { LedgerBudgetCard } from './PersonalBudgetCard';
@@ -13,7 +13,7 @@ import { supabase } from '../supabaseClient';
 export const Dashboard: React.FC = () => {
   const { 
     ledgerMode, setLedgerMode, transactions, properties, calculatedBudgetsByLedger, 
-    setIsStatementModalOpen, setEditingTransaction, budgetSettings, saveBudget, refreshData 
+    setIsStatementModalOpen, setEditingTransaction, saveBudget, refreshData 
   } = useData();
 
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
@@ -32,6 +32,14 @@ export const Dashboard: React.FC = () => {
      }); 
      refreshData();
   };
+  
+  const liveBudgetValues = useMemo(() => {
+    return [
+      ...calculatedBudgetsByLedger.active,
+      ...calculatedBudgetsByLedger.passive,
+      ...calculatedBudgetsByLedger.personal
+    ];
+  }, [calculatedBudgetsByLedger]);
 
   return (
     <main className="space-y-6">
@@ -82,7 +90,7 @@ export const Dashboard: React.FC = () => {
           <BudgetEditor 
             isOpen={true} 
             onClose={() => setIsBudgetModalOpen(false)} 
-            budgetData={budgetSettings} 
+            budgetData={liveBudgetValues} 
             onSave={saveBudget}
             initialLedger={editingBudgetLedger}
           />

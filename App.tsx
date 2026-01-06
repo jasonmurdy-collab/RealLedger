@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { DataProvider, useData } from './context/DataContext';
 import { Layout } from './components/Layout';
@@ -27,11 +27,21 @@ const AppContent: React.FC = () => {
     isNotificationModalOpen, setIsNotificationModalOpen,
     editingTransaction, setEditingTransaction,
     addTransaction, updateTransaction, deleteTransaction, saveMileage, saveInvoice, deleteInvoice, updateProfile, uploadAvatar, logout,
-    theme, toggleTheme
+    theme, toggleTheme,
+    calculatedBudgetsByLedger
   } = useData();
 
   const [isMileageModalOpen, setIsMileageModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | 'new' | null>(null);
+
+  const liveBudgetValues = useMemo(() => {
+    if (!calculatedBudgetsByLedger) return [];
+    return [
+      ...calculatedBudgetsByLedger.active,
+      ...calculatedBudgetsByLedger.passive,
+      ...calculatedBudgetsByLedger.personal
+    ];
+  }, [calculatedBudgetsByLedger]);
 
   if (!session) return <AuthScreen />;
 
@@ -41,7 +51,7 @@ const AppContent: React.FC = () => {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/analytics" element={<AnalyticsView mode={ledgerMode} transactions={transactions} />} />
-          <Route path="/expenses" element={<ExpensesView transactions={transactions} properties={properties} budgets={budgetSettings} onEditTransaction={setEditingTransaction} />} />
+          <Route path="/expenses" element={<ExpensesView transactions={transactions} properties={properties} budgets={liveBudgetValues} onEditTransaction={setEditingTransaction} />} />
           <Route path="/mileage" element={<MileageView logs={mileageLogs} onAddTrip={() => setIsMileageModalOpen(true)} />} />
           <Route path="/invoices" element={<InvoiceView invoices={invoices} onNewInvoice={() => setEditingInvoice('new')} onEditInvoice={setEditingInvoice} />} />
           <Route path="/profile" element={
@@ -66,7 +76,7 @@ const AppContent: React.FC = () => {
             onClose={() => setIsDrawerOpen(false)} 
             onAddTransaction={addTransaction} 
             properties={properties} 
-            budgets={budgetSettings} 
+            budgets={liveBudgetValues} 
           />
       )}
       <NotificationModal isOpen={isNotificationModalOpen} onClose={() => setIsNotificationModalOpen(false)} notifications={notifications} />
@@ -79,7 +89,7 @@ const AppContent: React.FC = () => {
             onSave={updateTransaction} 
             onDelete={deleteTransaction} 
             properties={properties} 
-            budgets={budgetSettings}
+            budgets={liveBudgetValues}
           />
       )}
       {editingInvoice && (
